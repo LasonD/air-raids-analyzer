@@ -103,6 +103,33 @@ def ukraine_map(geo, codes, probs, actual=None, title=""):
     return fig
 
 
+def hour_span(start: pd.Timestamp) -> str:
+    a = start.tz_convert("Europe/Kyiv")
+    return f"{a:%H:%M}–{a + pd.Timedelta(hours=1):%H:%M}, {a:%a %d %b}"
+
+
+def hourly_chart(starts, frame, actual, model, mark, title):
+    """Forecast probability per hour (line) against hours that had an alert (shaded), centred on each hour."""
+    mid = (starts + pd.Timedelta(minutes=30)).dt.tz_convert("Europe/Kyiv")
+    fig = go.Figure()
+    if actual is not None:
+        fig.add_trace(go.Bar(x=mid, y=actual, width=3_600_000, name="alert happened", marker_color=ALERT_RED,
+                             opacity=0.25, hovertemplate="%{x|%d %b %H:00}: alert<extra></extra>"))
+    for col in ("climatology", model if model != "climatology" else None):
+        if col:
+            fig.add_trace(go.Scatter(x=mid, y=frame[f"p_{col}"], name=MODELS[col][0], mode="lines+markers",
+                                     marker=dict(size=6),
+                                     line=dict(color=MODELS[col][1], width=2, dash="dash" if col == "climatology" else "solid"),
+                                     hovertemplate=MODELS[col][0] + ": %{y:.0%}<extra></extra>"))
+    fig.add_vrect(x0=mark.tz_convert("Europe/Kyiv"), x1=(mark + pd.Timedelta(hours=1)).tz_convert("Europe/Kyiv"),
+                  line_width=1, line_color=NEUTRAL, fillcolor="rgba(0,0,0,0)", annotation_text="map hour",
+                  annotation_position="top left")
+    fig.update_layout(height=300, margin=dict(l=10, r=10, t=40, b=10), bargap=0, title=title,
+                      yaxis=dict(tickformat=".0%", range=[0, 1]), legend=dict(orientation="h", y=-0.3),
+                      hovermode="x unified", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+    return fig
+
+
 def line_chart(df, x, cols, ytitle, yfmt=None, ref_zero=False):
     fig = go.Figure()
     for col in cols:
@@ -137,7 +164,7 @@ with tab_map:
     choice = c1.select_slider("Forecast issued at (Kyiv time); the right end is the latest forecast, with no outcome yet",
                               options=options, value=options[-1],
                               format_func=lambda o: "▶ latest forecast" if o == LATEST else kyiv(o))
-    h = c2.slider("Hours ahead", 1, 24, 6)
+    h = c2.slider("Hours ahead (1 = the hour right after the forecast)", 1, 24, 6)
     model = SOURCE_SETS[c3.radio("Model", list(SOURCE_SETS), index=0)]
 
     if choice == LATEST:
@@ -154,9 +181,10 @@ with tab_map:
         issued = choice
         note = None
     target = issued + pd.Timedelta(hours=h - 1)  # h=1 is the hour right after issuing
+    c2.caption(f"→ the hour {hour_span(target)} (Kyiv), forecast at {kyiv(issued)}")
     left, right = st.columns([3, 1])
     left.plotly_chart(ukraine_map(geo, list(rows["code"]), probs, actual,
-                                  f"Hour starting {kyiv(target)}  ·  issued {kyiv(issued)}"),
+                                  f"Hour {hour_span(target)}  ·  forecast issued {kyiv(issued)}"),
                       use_container_width=True)
     with right:
         st.markdown("**At this moment**")
@@ -172,36 +200,32 @@ with tab_map:
         st.caption("Fill = forecast probability. Red outline = alert actually happened in that hour. "
                    "Grey = not forecast (Luhansk, Crimea: no usable alert data).")
 
-    region = st.selectbox("Region timeline", [BY_CODE[c].name for c in CODES], index=CODES.index("UA-30"))
+    region = st.selectbox("Region", [BY_CODE[c].name for c in CODES], index=CODES.index("UA-30"))
     rc = CODES.index(next(c for c in CODES if BY_CODE[c].name == region))
+    shown = "main" if choice == LATEST and model != "climatology" else model
+
+    # All 24 forecasts made at the chosen moment: the view "what did the model expect for the next day".
+    if choice == LATEST:
+        one = fc[fc["region"] == rc].sort_values("h")
+        if "p_main" not in one:
+            one = one.assign(p_main=one["p"])
+        one_actual = None
+    else:
+        one = test[(test["t"] == choice) & (test["region"] == rc)].sort_values("h")
+        one_actual = one["y"]
+    starts = one["t"] + pd.to_timedelta(one["h"] - 1, unit="h")
+    st.plotly_chart(hourly_chart(starts, one, one_actual, shown, mark=target,
+                                 title=f"{region}: the 24 hourly forecasts made at {kyiv(issued)}"),
+                    use_container_width=True)
+
+    # The same horizon, issue after issue: how the h-hours-ahead forecast tracked reality.
     if choice != LATEST:
         window = test[(test["region"] == rc) & (test["h"] == h)
                       & (test["t"].between(choice - pd.Timedelta(days=3), choice + pd.Timedelta(days=3)))].sort_values("t")
-        tt = window["t"] + pd.Timedelta(hours=h - 1)
-        fig = go.Figure()
-        fig.add_trace(go.Bar(x=tt.dt.tz_convert("Europe/Kyiv"), y=window["y"], name="alert happened",
-                             marker_color=ALERT_RED, opacity=0.25, hovertemplate="%{x}: alert<extra></extra>"))
-        for col in ("climatology", model if model != "climatology" else None):
-            if col:
-                fig.add_trace(go.Scatter(x=tt.dt.tz_convert("Europe/Kyiv"), y=window[f"p_{col}"], name=MODELS[col][0],
-                                         line=dict(color=MODELS[col][1], width=2, dash="dash" if col == "climatology" else "solid")))
-        fig.add_vline(x=target.tz_convert("Europe/Kyiv"), line=dict(color=NEUTRAL, width=1, dash="dot"))
-        fig.update_layout(height=300, margin=dict(l=10, r=10, t=30, b=10), bargap=0,
-                          title=f"{region}: forecast made {h}h ahead vs what happened (±3 days)",
-                          yaxis=dict(tickformat=".0%", range=[0, 1]), legend=dict(orientation="h", y=-0.3),
-                          hovermode="x unified", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
-        st.plotly_chart(fig, use_container_width=True)
-    else:
-        one = fc[fc["region"] == rc].sort_values("h")
-        fig = go.Figure()
-        x = (one["t"] + pd.to_timedelta(one["h"] - 1, unit="h")).dt.tz_convert("Europe/Kyiv")
-        fig.add_trace(go.Scatter(x=x, y=one["p"], name=MODELS["main"][0], line=dict(color=MODELS["main"][1], width=2)))
-        fig.add_trace(go.Scatter(x=x, y=one["p_climatology"], name=MODELS["climatology"][0],
-                                 line=dict(color=NEUTRAL, width=2, dash="dash")))
-        fig.update_layout(height=300, margin=dict(l=10, r=10, t=30, b=10), title=f"{region}: next 24 hours",
-                          yaxis=dict(tickformat=".0%", range=[0, 1]), legend=dict(orientation="h", y=-0.3),
-                          hovermode="x unified", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(hourly_chart(window["t"] + pd.Timedelta(hours=h - 1), window, window["y"], shown, mark=target,
+                                     title=f"{region}: forecasts made {h} h before each hour, ±3 days around the chosen "
+                                           f"moment, vs what happened"),
+                        use_container_width=True)
 
 with tab_acc:
     st.markdown("**Brier skill vs climatology by forecast horizon** (test period; above 0 = better than the "

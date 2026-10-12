@@ -8,6 +8,8 @@ alert-map channel (@povitryanatrivogaaa). It is evaluated on the last four weeks
 
 ![Map replay](docs/screenshots/02_map_replay.png)
 
+*Map replay: the forecast made on 30 Sep at 03:00 for the hour 13:00–14:00 (11 hours ahead). Fill = forecast probability, red outline = an alert actually happened in that hour. Here 13 regions had an alert and the model did slightly worse than climatology, an honest miss.*
+
 ## Results (test period, 14 Sep – 12 Oct 2026, 380k forecasts)
 
 Brier skill = improvement in Brier score over **climatology** (the region's alert share at that hour of
@@ -53,6 +55,7 @@ What this says:
 |---|---|
 | ![Accuracy](docs/screenshots/03_accuracy.png) | ![Sources](docs/screenshots/04_sources.png) |
 | ![Latest forecast](docs/screenshots/01_map_latest.png) | ![Data](docs/screenshots/05_data.png) |
+| ![Region: 24 forecasts from one moment](docs/screenshots/06_region_charts.png) | |
 
 ## What went wrong along the way (and what changed)
 
