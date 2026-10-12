@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import time
 
-import numpy as np
 import pandas as pd
 
 from airraid.config import Config

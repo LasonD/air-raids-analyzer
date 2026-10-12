@@ -9,6 +9,7 @@ import pytest
 
 from airraid.config import Config
 from airraid.features import Inputs, build, expand, feature_columns, target_hour
+from airraid.pipeline import known_at
 from airraid.regions import CODES
 from airraid.schema import SourceData
 
@@ -41,16 +42,6 @@ def _synthetic_inputs() -> Inputs:
                   [SourceData("chan", "signals", posts, T0, end)])
 
 
-def _known_at(inputs: Inputs, cut: pd.Timestamp) -> Inputs:
-    a = inputs.alerts.frame
-    a = a[a["start_utc"] < cut].copy()
-    a.loc[a["end_utc"] > cut, "end_utc"] = cut + pd.Timedelta(days=365)  # still running, end unknown
-    s = inputs.signals[0]
-    p = s.frame[s.frame["published_at_utc"] < cut]
-    return Inputs(SourceData("alerts", "alerts", a, inputs.alerts.covered_from, cut),
-                  [SourceData(s.name, "signals", p, s.covered_from, cut)])
-
-
 @pytest.mark.parametrize("cut_hours", [24 * 40 + 0, 24 * 55 + 7, 24 * 70 + 19])
 def test_features_do_not_look_ahead(cut_hours):
     cfg = Config()
@@ -59,7 +50,7 @@ def test_features_do_not_look_ahead(cut_hours):
     times = pd.date_range(T0 + pd.Timedelta(days=30), cut, freq="h")
 
     full = expand(build(inputs, times, cfg), cfg.horizons)
-    known = expand(build(_known_at(inputs, cut), times, cfg), cfg.horizons)
+    known = expand(build(known_at(inputs, cut), times, cfg), cfg.horizons)
 
     cols = feature_columns(full)
     pd.testing.assert_frame_equal(full[cols], known[cols], check_exact=False, rtol=1e-6)
@@ -76,7 +67,7 @@ def test_detects_a_planted_leak():
     cut = T0 + pd.Timedelta(days=50)
     times = pd.date_range(T0 + pd.Timedelta(days=30), cut, freq="h")
     full = expand(build(inputs, times, cfg), cfg.horizons)
-    known = expand(build(_known_at(inputs, cut), times, cfg), cfg.horizons)
+    known = expand(build(known_at(inputs, cut), times, cfg), cfg.horizons)
     full["leak"], known["leak"] = full["y"], known["y"]
     with pytest.raises(AssertionError):
         pd.testing.assert_frame_equal(full[["leak"]], known[["leak"]])
