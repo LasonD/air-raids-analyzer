@@ -6,11 +6,14 @@ dropped; short follow-ups without a threat type inherit the kind of the previous
 """
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
+from pathlib import Path
 
 import pandas as pd
 
+from airraid.paths import ROOT
 from airraid.regions import find_regions
 from airraid.schema import SourceData, validate
 from airraid.sources import telegram_fetch
@@ -38,6 +41,7 @@ CHANNEL_DROP = {
         r"ЗБИТО|ПОДАВЛЕНО|Карта повітряних тривог|^💔|Попередн\w* (?:по|наслідк)|дорозвідк|Зеленськ"),
 }
 FOLLOW_UP_WINDOW = pd.Timedelta("60min")
+SNAPSHOT_DIR = ROOT / "data" / "snapshot"
 
 
 def classify(text: str, channel: str) -> str:
@@ -77,7 +81,17 @@ class TelegramSignals:
         posts.loc[is_follow & ~inherit, "kind"] = DROP
         return posts
 
+    @property
+    def snapshot(self) -> Path:
+        return SNAPSHOT_DIR / f"{self.channel}.parquet"
+
     def load(self) -> SourceData:
+        """Parse the downloaded pages; without them, use the committed snapshot of parsed events."""
+        if not any((telegram_fetch.DEFAULT_CACHE / self.channel).glob("*.html.gz")):
+            df = pd.read_parquet(self.snapshot)
+            meta = json.loads(self.snapshot.with_suffix(".json").read_text())
+            return validate(SourceData(self.name, "signals", df, pd.Timestamp(meta["covered_from"]),
+                                       pd.Timestamp(meta["covered_to"])))
         posts = self.classified_posts()
         covered_from = posts["published_at_utc"].min().ceil("h")
         covered_to = posts["published_at_utc"].max().floor("h")
@@ -86,3 +100,12 @@ class TelegramSignals:
         kept["region"] = kept["regions"].map(lambda r: r or [None])
         df = kept.explode("region")[["published_at_utc", "region", "kind", "ref", "edited"]]
         return validate(SourceData(self.name, "signals", df.reset_index(drop=True), covered_from, covered_to))
+
+    def save_snapshot(self) -> Path:
+        """Parsed events only (no post text): posts get edited or deleted, so a re-download would differ."""
+        data = self.load()
+        SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+        data.frame.to_parquet(self.snapshot, index=False, compression="zstd")
+        self.snapshot.with_suffix(".json").write_text(json.dumps(
+            {"covered_from": str(data.covered_from), "covered_to": str(data.covered_to), "rows": len(data.frame)}, indent=2))
+        return self.snapshot

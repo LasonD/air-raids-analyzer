@@ -1,4 +1,4 @@
-"""Command line: python -m airraid {fetch,context,backtest,forecast,report,gui}."""
+"""Command line: python -m airraid {fetch,snapshot,context,backtest,forecast,report,gui}."""
 from __future__ import annotations
 
 import argparse
@@ -16,6 +16,7 @@ from airraid.config import Config
 from airraid.hourly import cap_durations, hourly_matrix
 from airraid.schema import KINDS
 from airraid.sources import registry
+from airraid.paths import RAW
 from airraid.sources.telegram import DROP
 
 RESULTS = paths.RESULTS
@@ -35,6 +36,11 @@ def cmd_context(cfg: Config, args) -> None:
     health = [{"source": alerts.name, "role": "alerts (target)", "covered_from": str(alerts.covered_from),
                "covered_to": str(alerts.covered_to), "records": len(alerts.frame)}]
     for name in cfg.signals:
+        if not any((RAW / "telegram" / name).glob("*.html.gz")):  # fresh clone: only the snapshot exists
+            d = reg[name].load()
+            health.append({"source": name, "role": "signals (snapshot)", "covered_from": str(d.covered_from),
+                           "covered_to": str(d.covered_to), "records": len(d.frame)})
+            continue
         posts = reg[name].classified_posts()
         threat = posts["kind"].isin(KINDS) & (posts["kind"] != "clear")
         daily = posts.set_index("published_at_utc").resample("D").size()
@@ -48,6 +54,12 @@ def cmd_context(cfg: Config, args) -> None:
     H = hourly_matrix(cap_durations(alerts.frame, cfg.max_alert_hours), hours, alerts.covered_to)
     H.to_parquet(RESULTS / "hourly_alerts.parquet")
     print(pd.DataFrame(health).to_string(index=False))
+
+
+def cmd_snapshot(cfg: Config, args) -> None:
+    """Commit-able parsed Telegram events (no text), so results can be reproduced after posts change."""
+    for name in cfg.signals:
+        print(f"{name}: {registry()[name].save_snapshot()}")
 
 
 def cmd_backtest(cfg: Config, args) -> None:
@@ -100,7 +112,7 @@ def cmd_gui(cfg: Config, args) -> None:
 
 def main() -> None:
     p = argparse.ArgumentParser(prog="airraid")
-    p.add_argument("command", choices=["fetch", "context", "backtest", "forecast", "report", "gui"])
+    p.add_argument("command", choices=["fetch", "snapshot", "context", "backtest", "forecast", "report", "gui"])
     p.add_argument("--sources", default=backtest.MAIN_MODEL, choices=list(backtest.SOURCE_SETS),
                    help="forecast: source set (default: the one with the best validation score)")
     p.add_argument("--exclude-edited", action="store_true", help="drop edited Telegram posts (robustness)")
@@ -108,4 +120,4 @@ def main() -> None:
     args = p.parse_args()
     cfg = replace(Config(), exclude_edited=args.exclude_edited)
     {"fetch": cmd_fetch, "context": cmd_context, "backtest": cmd_backtest, "forecast": cmd_forecast,
-     "report": cmd_report, "gui": cmd_gui}[args.command](cfg, args)
+     "report": cmd_report, "gui": cmd_gui, "snapshot": cmd_snapshot}[args.command](cfg, args)
