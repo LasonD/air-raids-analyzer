@@ -47,8 +47,7 @@ CSS = """<style>
 [class*="st-key-nodebox_"] button div, [class*="st-key-nodebox_"] button p {min-width: 0; max-width: 100%;}
 [class*="st-key-nodebox_"] button p {font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;}
 .st-key-topbar button {padding-left: 0.3rem; padding-right: 0.3rem;}
-.st-key-branches {border-style: dashed !important; padding: 0.3rem 0.45rem 0.45rem !important; gap: 0.2rem !important;}
-.branch-label {text-align: center; font-size: 0.75rem; color: #8a8985; line-height: 1.2;}
+.st-key-branches {gap: 0.35rem !important;}
 .st-key-branches [class*="st-key-nodebox_"] {padding: 0.3rem 0.45rem !important; gap: 0.5rem !important;
   flex-wrap: nowrap !important;}
 .st-key-branches [class*="st-key-nodebox_"] > div:first-child {flex: 0 0 52% !important; min-width: 0;}
@@ -309,8 +308,7 @@ def strip():
     for i, stage in enumerate(ORDER[:3]):
         node(cols[2 * i], stage)
         arrow(cols[2 * i + 1])
-    with cols[6].container(border=True, key="branches"):
-        st.html("<div class='branch-label'>in parallel · each needs only Format</div>")
+    with cols[6].container(key="branches"):
         for stage in ORDER[3:6]:
             node(st, stage, compact=True)
     arrow(cols[7])
