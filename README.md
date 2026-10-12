@@ -270,6 +270,9 @@ pipeline.py: the same steps as stages the app runs one by one at any replay mome
 
 ## Repository
 
+The AI conversation log (Claude Code, exported; its early part is compacted into a summary) is in
+[docs/conversation-log.txt](docs/conversation-log.txt).
+
 ```
 airraid/            package: regions, schema, sources/, hourly, features, models, backtest, evaluate, cli
 airraid/pipeline.py the pipeline as stages at a replay moment (used by the app)
