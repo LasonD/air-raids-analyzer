@@ -1,2 +1,9 @@
 # Local Claude Code notes, not part of the submission
 CLAUDE.local.md
+
+# Python
+.venv/
+__pycache__/
+
+# Raw downloads (re-creatable); parsed snapshots are committed separately
+data/raw/
