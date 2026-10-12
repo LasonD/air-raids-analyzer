@@ -24,17 +24,18 @@ BLUES = ["#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", "#0d3
 ALERT_RED = "#d03b3b"   # status "critical": always paired with the label "alert happened"
 NEUTRAL = "#8a8985"
 MODELS = {  # column -> (label, colour); colour follows the model in every chart
-    "gbm_both": ("Boosting + both channels", "#e87ba4"),
+    "main": ("Main: alert-map for 1-3 h, history after", "#2a78d6"),
     "gbm_none": ("Boosting, alert history only", "#eb6834"),
     "logistic": ("Logistic regression", "#1baf7a"),
     "gbm_kpszsu": ("Boosting + Air Force", "#eda100"),
-    "gbm_alertmap": ("Boosting + alert-map (main)", "#2a78d6"),
+    "gbm_alertmap": ("Boosting + alert-map", "#e87ba4"),
+    "gbm_both": ("Boosting + both channels", "#6250d6"),
     "persistence": ("Persistence (as now)", "#008300"),
     "climatology": ("Climatology (28-day hourly rate)", NEUTRAL),
 }
-# First entry = main model, picked on the validation weeks (see airraid/backtest.py MAIN_MODEL).
-SOURCE_SETS = {"Alert-map only (main)": "gbm_alertmap", "Both channels": "gbm_both", "Air Force only": "gbm_kpszsu",
-               "No Telegram": "gbm_none", "Climatology baseline": "climatology"}
+# First entry = main model, picked on the validation weeks (see SHORT_HORIZON in airraid/backtest.py).
+SOURCE_SETS = {"Main model": "main", "Alert-map only": "gbm_alertmap", "Both channels": "gbm_both",
+               "Air Force only": "gbm_kpszsu", "No Telegram": "gbm_none", "Climatology baseline": "climatology"}
 
 st.set_page_config(page_title="Air raid alert forecast", layout="wide")
 
@@ -145,7 +146,7 @@ with tab_map:
         actual = None
         issued = rows["t"].iat[0]
         note = ("Latest forecast: uses Telegram posts up to the issue time; the outcome is not known yet. "
-                "It is computed for the main model (alert-map) and climatology only; other choices show the main model.")
+                "It is computed for the main model and climatology only; other choices show the main model.")
     else:
         rows = test[(test["t"] == choice) & (test["h"] == h)].sort_values("region")
         probs = rows[f"p_{model}"].to_numpy()
@@ -194,7 +195,7 @@ with tab_map:
         one = fc[fc["region"] == rc].sort_values("h")
         fig = go.Figure()
         x = (one["t"] + pd.to_timedelta(one["h"] - 1, unit="h")).dt.tz_convert("Europe/Kyiv")
-        fig.add_trace(go.Scatter(x=x, y=one["p"], name=MODELS["gbm_alertmap"][0], line=dict(color=MODELS["gbm_alertmap"][1], width=2)))
+        fig.add_trace(go.Scatter(x=x, y=one["p"], name=MODELS["main"][0], line=dict(color=MODELS["main"][1], width=2)))
         fig.add_trace(go.Scatter(x=x, y=one["p_climatology"], name=MODELS["climatology"][0],
                                  line=dict(color=NEUTRAL, width=2, dash="dash")))
         fig.update_layout(height=300, margin=dict(l=10, r=10, t=30, b=10), title=f"{region}: next 24 hours",
@@ -214,10 +215,10 @@ with tab_acc:
         # The next hour is far easier than the rest; on one axis it would flatten every other horizon.
         st.markdown("Next hour (h = 1)")
         tiles = st.columns(4)
-        for tile, col in zip(tiles, ["gbm_alertmap", "gbm_none", "gbm_both", "logistic"]):
+        for tile, col in zip(tiles, ["main", "gbm_none", "gbm_both", "logistic"]):
             tile.metric(MODELS[col][0], f"{wide.loc[wide['h'] == 1, col].iat[0]:.3f}")
-        st.markdown("2 to 24 hours ahead")
-        st.plotly_chart(line_chart(wide[wide["h"] >= 2], "h", ["gbm_alertmap", "gbm_none", "logistic", "climatology"],
+        st.markdown("2 to 24 hours ahead (from 4 h the main model *is* the alert-history model, so the lines coincide)")
+        st.plotly_chart(line_chart(wide[wide["h"] >= 2], "h", ["main", "gbm_none", "logistic", "climatology"],
                                    "Brier skill", ref_zero=True), use_container_width=True)
     ov = extra["metrics_overall"]
     if ov is not None:
@@ -227,22 +228,22 @@ with tab_acc:
     c1, c2 = st.columns(2)
     with c1:
         st.markdown("**Calibration** (test, main model): when it says 30%, is there an alert 30% of the time?")
-        b = np.minimum((test["p_gbm_alertmap"] * 10).astype(int), 9)
-        cal = test.groupby(b).agg(predicted=("p_gbm_alertmap", "mean"), observed=("y", "mean"), n=("y", "size"))
+        b = np.minimum((test["p_main"] * 10).astype(int), 9)
+        cal = test.groupby(b).agg(predicted=("p_main", "mean"), observed=("y", "mean"), n=("y", "size"))
         fig = go.Figure([go.Scatter(x=[0, 1], y=[0, 1], mode="lines", line=dict(color=NEUTRAL, dash="dot"), name="perfect"),
-                         go.Scatter(x=cal["predicted"], y=cal["observed"], mode="lines+markers", name=MODELS["gbm_alertmap"][0],
-                                    line=dict(color=MODELS["gbm_alertmap"][1], width=2), marker=dict(size=8),
+                         go.Scatter(x=cal["predicted"], y=cal["observed"], mode="lines+markers", name=MODELS["main"][0],
+                                    line=dict(color=MODELS["main"][1], width=2), marker=dict(size=8),
                                     customdata=cal["n"], hovertemplate="predicted %{x:.0%} → observed %{y:.0%} (n=%{customdata})<extra></extra>")])
         fig.update_layout(height=360, xaxis=dict(title="predicted probability", tickformat=".0%"),
                           yaxis=dict(title="observed frequency", tickformat=".0%"), margin=dict(l=10, r=10, t=10, b=10),
                           legend=dict(orientation="h", y=-0.25), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
         st.plotly_chart(fig, use_container_width=True)
     with c2:
-        st.markdown("**Brier skill by region** (test, main model: boosting + alert-map)")
+        st.markdown("**Brier skill by region** (test, main model)")
         br = extra["metrics_by_region"]
         if br is not None:
-            r = br[br["model"] == "gbm_alertmap"].sort_values("brier_skill")
-            fig = go.Figure(go.Bar(x=r["brier_skill"], y=r["region_name"], orientation="h", marker_color=MODELS["gbm_alertmap"][1],
+            r = br[br["model"] == "main"].sort_values("brier_skill")
+            fig = go.Figure(go.Bar(x=r["brier_skill"], y=r["region_name"], orientation="h", marker_color=MODELS["main"][1],
                                    hovertemplate="%{y}: %{x:.2f}<extra></extra>"))
             fig.update_layout(height=520, margin=dict(l=10, r=10, t=10, b=10), xaxis=dict(title="Brier skill vs climatology"),
                               paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
@@ -259,8 +260,9 @@ with tab_src:
         st.markdown("2 to 24 hours ahead")
         st.plotly_chart(line_chart(wide[wide["h"] >= 2], "h", ["gbm_both", "gbm_none", "gbm_kpszsu", "gbm_alertmap"],
                                    "Brier skill", ref_zero=True), use_container_width=True)
-        st.caption("Scores follow the 'Moments scored' choice on the Accuracy tab. Telegram helps mainly in the "
-                   "first 1-3 hours, at moments with no alert running.")
+        st.caption("Scores follow the 'Moments scored' choice on the Accuracy tab. Edited Telegram posts are "
+                   "excluded (their edit time is unknown). On the validation weeks the alert-map channel helped for "
+                   "the first 1-3 hours only, so the main model uses it there and alert history alone after.")
     if health:
         st.markdown("**Source health**")
         st.dataframe(pd.DataFrame(health), hide_index=True, use_container_width=True)

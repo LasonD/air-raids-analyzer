@@ -66,22 +66,33 @@ def cmd_backtest(cfg: Config, args) -> None:
     RESULTS.mkdir(exist_ok=True)
     cmd_context(cfg, args)
     pred = backtest.run(cfg)
-    suffix = "_no_edited" if cfg.exclude_edited else ""
-    small = pred.astype({c: "float32" for c in pred.columns if c.startswith("p_")} | {"y": "int8", "active_now": "int8"})
-    small.to_parquet(RESULTS / f"predictions{suffix}.parquet", index=False, compression="zstd")
-    cmd_report(cfg, args, pred=pred, suffix=suffix)
+    _save_predictions(pred, _suffix(cfg))
+    cmd_report(cfg, args, pred=pred)
 
 
 def cmd_forecast(cfg: Config, args) -> None:
     RESULTS.mkdir(exist_ok=True)
-    sources = backtest.SOURCE_SETS[args.sources]
-    fc = backtest.latest_forecast(cfg, sources)
+    fc = backtest.latest_forecast(cfg)
     fc.to_parquet(RESULTS / "forecast_latest.parquet", index=False)
-    print(f"forecast issued at {fc['t'].iat[0]} with sources {args.sources} -> results/forecast_latest.parquet")
+    print(f"forecast issued at {fc['t'].iat[0]} (main model) -> results/forecast_latest.parquet")
 
 
-def cmd_report(cfg: Config, args, pred: pd.DataFrame | None = None, suffix: str = "") -> None:
-    pred = pred if pred is not None else pd.read_parquet(RESULTS / f"predictions{suffix}.parquet")
+def _suffix(cfg: Config) -> str:
+    return "" if cfg.exclude_edited else "_with_edited"
+
+
+def _save_predictions(pred: pd.DataFrame, suffix: str) -> None:
+    small = pred.astype({c: "float32" for c in pred.columns if c.startswith("p_")} | {"y": "int8", "active_now": "int8"})
+    small.to_parquet(RESULTS / f"predictions{suffix}.parquet", index=False, compression="zstd")
+
+
+def cmd_report(cfg: Config, args, pred: pd.DataFrame | None = None) -> None:
+    suffix = _suffix(cfg)
+    if pred is None:
+        pred = pd.read_parquet(RESULTS / f"predictions{suffix}.parquet")
+        if "p_main" not in pred:
+            pred = backtest.add_main_model(pred)
+            _save_predictions(pred, suffix)
     overall = evaluate.summary(pred, ["period"])
     test = pred[pred["period"] == "test"]
     # "Quiet" = no alert running at the issue time: the honest question of whether a new one starts.
@@ -92,7 +103,7 @@ def cmd_report(cfg: Config, args, pred: pd.DataFrame | None = None, suffix: str 
     evaluate.summary(quiet, ["h"]).to_csv(RESULTS / f"metrics_by_horizon_quiet{suffix}.csv", index=False)
     evaluate.region_names(evaluate.summary(pred[pred["period"] == "test"], ["region"])).to_csv(
         RESULTS / f"metrics_by_region{suffix}.csv", index=False)
-    meta = {"data_end": str(cfg.data_end), "val_start": str(cfg.val_start), "test_start": str(cfg.test_start),
+    meta = {"main_model": f"alert-map for h<={backtest.SHORT_HORIZON}, alert history after", "data_end": str(cfg.data_end), "val_start": str(cfg.val_start), "test_start": str(cfg.test_start),
             "train_days": cfg.train_days, "retrain_days": cfg.retrain_days, "exclude_edited": cfg.exclude_edited}
     (RESULTS / f"run{suffix}.json").write_text(json.dumps(meta, indent=2))
     with pd.option_context("display.width", 160, "display.max_columns", 20):
@@ -113,11 +124,10 @@ def cmd_gui(cfg: Config, args) -> None:
 def main() -> None:
     p = argparse.ArgumentParser(prog="airraid")
     p.add_argument("command", choices=["fetch", "snapshot", "context", "backtest", "forecast", "report", "gui"])
-    p.add_argument("--sources", default=backtest.MAIN_MODEL, choices=list(backtest.SOURCE_SETS),
-                   help="forecast: source set (default: the one with the best validation score)")
-    p.add_argument("--exclude-edited", action="store_true", help="drop edited Telegram posts (robustness)")
+    p.add_argument("--include-edited", action="store_true",
+                   help="keep edited Telegram posts (comparison run; their edit time is unknown)")
     p.add_argument("--no-browser", action="store_true", help="gui: do not open a browser tab")
     args = p.parse_args()
-    cfg = replace(Config(), exclude_edited=args.exclude_edited)
+    cfg = replace(Config(), exclude_edited=not args.include_edited)
     {"fetch": cmd_fetch, "context": cmd_context, "backtest": cmd_backtest, "forecast": cmd_forecast,
      "report": cmd_report, "gui": cmd_gui, "snapshot": cmd_snapshot}[args.command](cfg, args)

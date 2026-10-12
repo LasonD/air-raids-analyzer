@@ -20,7 +20,9 @@ class Config:
     horizons: tuple[int, ...] = tuple(range(1, 25))
     max_alert_hours: float = 12.0                 # longer alerts are treated as a missed all-clear
     train_horizons_per_row: int = 3               # horizons sampled per training issue time (memory)
-    exclude_edited: bool = False                  # robustness check: drop edited Telegram posts
+    # Telegram shows the publish time but the latest text, and the edit time is unknown: edited posts
+    # may carry later information (route summaries are updated in place), so they are dropped.
+    exclude_edited: bool = True
     seed: int = 0
     extra: dict = field(default_factory=dict)
 

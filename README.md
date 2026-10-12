@@ -12,33 +12,42 @@ alert-map channel (@povitryanatrivogaaa). It is evaluated on the last four weeks
 
 Brier skill = improvement in Brier score over **climatology** (the region's alert share at that hour of
 day over the last 28 days, a strong baseline). "Quiet" = no alert running when the forecast is issued,
-i.e. "will a new alert start?".
+i.e. "will a new alert start?". Edited Telegram posts are excluded (see leakage, point 4).
 
-| Model | Brier | AUC | Skill, all | Skill, next hour | Skill, next hour, quiet |
-|---|---|---|---|---|---|
-| Climatology | 0.184 | 0.754 | 0 | 0 | 0 |
-| Persistence ("as now") | 0.342 | 0.537 | −0.859 | −0.166 | −0.512 |
-| Logistic regression (alert history) | 0.182 | 0.762 | 0.009 | 0.111 | 0.041 |
-| Boosting, alert history only | 0.179 | 0.765 | 0.025 | 0.258 | 0.054 |
-| Boosting + Air Force channel | 0.180 | 0.763 | 0.022 | 0.257 | 0.057 |
-| **Boosting + alert-map channel (main)** | **0.179** | **0.766** | **0.027** | **0.262** | **0.065** |
-| Boosting + both channels | 0.180 | 0.764 | 0.022 | 0.258 | 0.065 |
+| Model | Brier | AUC | Skill (validation) | Skill (test) | Next hour | Next hour, quiet | 3 h ahead, quiet |
+|---|---|---|---|---|---|---|---|
+| Climatology | 0.184 | 0.754 | 0 | 0 | 0 | 0 | 0 |
+| Persistence ("as now") | 0.342 | 0.537 | −0.789 | −0.859 | −0.166 | −0.512 | −0.793 |
+| Logistic regression (alert history) | 0.182 | 0.762 | 0.016 | 0.009 | 0.111 | 0.041 | 0.006 |
+| Boosting, alert history only | 0.179 | 0.765 | 0.028 | 0.025 | 0.258 | 0.054 | 0.015 |
+| Boosting + Air Force channel | 0.179 | 0.765 | 0.023 | 0.024 | 0.260 | 0.059 | 0.014 |
+| Boosting + alert-map channel | 0.179 | 0.766 | 0.027 | 0.026 | 0.258 | 0.065 | 0.022 |
+| Boosting + both channels | 0.180 | 0.765 | 0.026 | 0.024 | 0.263 | 0.068 | 0.017 |
+| **Main: alert-map for 1–3 h, alert history after** | **0.179** | **0.765** | **0.028** | **0.025** | **0.258** | **0.065** | **0.022** |
 
 What this says:
 
 * **The next hour is where the skill is.** Mostly from "an alert is running now", but even at quiet
-  moments the model is 5–7 % better than climatology one hour ahead.
+  moments the model is ~6 % better than climatology one hour ahead.
 * **Beyond ~3 hours the daily rhythm dominates.** All models are only 1–2 % better than climatology:
   in the test period a region had 6.5 alerts a day with a median length of 18 minutes, so *which* hour
   is hard to call far ahead.
-* **Telegram helps for the first 1–3 hours.** At quiet moments, a post naming the region in the last
-  hour doubles the chance of an alert in the next hour (20 % → 41 %); the alert-map channel raises
-  next-hour skill at quiet moments from 0.054 to 0.065 (+20 %).
-* **The official Air Force channel makes the model worse** beyond a few hours. A likely reason (not
-  verified): it has 16 days with unusually few posts, which the model reads as a quiet sky.
-* **The main model was chosen on the validation weeks** (alert-map only was best at all 24 horizons
-  there); the test period confirmed it but was not used to choose.
-* Robustness: <!-- ROBUSTNESS -->
+* **Telegram helps for the first 1–3 hours, not after.** At quiet moments a post naming the region in
+  the last hour doubles the chance of an alert in the next hour (20 % → 41 %); next-hour skill at quiet
+  moments goes from 0.054 (no Telegram) to 0.065, and 3 hours ahead from 0.015 to 0.022. Further ahead,
+  Telegram features add noise, so the main model drops them after 3 h.
+* **The main model was chosen on the validation weeks only**: at quiet moments the alert-map channel
+  was best for 1–3 h and alert history alone for 4–17 h (it also won some of 18–22 h by small margins;
+  a single switch point at 3 h was kept as the simpler, more defensible rule). On the test weeks the
+  alert-map-only model scores slightly higher overall (0.026 vs 0.025), but switching to it after seeing
+  the test would be leakage.
+* **The official Air Force channel adds little.** A possible reason (not verified): 16 days with
+  unusually few posts, which the model may read as a quiet sky.
+* **Edited posts matter.** Keeping them, the alert-map model looked best everywhere on validation
+  (0.032); without them it drops to 0.027. The channel updates big route summaries in place, mostly
+  without "UPD", and Telegram does not show when, so those edits can carry later information. All
+  numbers above exclude edited posts; `--include-edited` reproduces the comparison
+  (`results/*_with_edited.*`).
 
 | | |
 |---|---|
@@ -59,6 +68,10 @@ What this says:
   row of a post was kept).
 * **Picking the best source set on the test chart would have been leakage** (the alert-map model
   looked best there); the choice was made on validation instead.
+* **A robustness check turned into a leakage fix.** Dropping edited Telegram posts was meant as a
+  sanity check, but it removed most of the alert-map channel's advantage on validation: route summaries
+  are edited in place with later positions. Edited posts are now excluded by default, and the model
+  choice was redone on validation (alert-map only for 1–3 h).
 * **Map drawn inside-out.** GeoJSON polygons wind counter-clockwise, Plotly expects clockwise, so
   every region covered the globe; found with a Playwright screenshot.
 
@@ -77,7 +90,7 @@ pytest                           # includes the leakage tests
 python -m airraid fetch          # alert CSV (pinned version) + Telegram pages since 1 Jan 2026
 python -m airraid backtest       # weekly-retrained evaluation -> results/
 python -m airraid forecast       # forecast for the 24 h after the end of the data
-python -m airraid backtest --exclude-edited   # robustness: without edited Telegram posts
+python -m airraid backtest --include-edited   # comparison: with edited Telegram posts
 ```
 
 `results/` is committed, so the GUI works right after `pip install`. The GUI only listens on localhost.
@@ -127,7 +140,12 @@ sources/ (one adapter per source)        core (never sees a source name)
   in the last 1/3/6 h and countrywide posts in the last 3/24 h by threat group (drone, missile, aviation,
   explosion, all-clear).
 * **Models**: climatology (28-day rate for this region and hour of day), persistence, logistic regression
-  on alert history, and gradient boosting (`HistGradientBoostingClassifier`) once per source set.
+  on alert history, and gradient boosting (`HistGradientBoostingClassifier`) once per source set. The
+  main model uses the alert-map boosting model for 1–3 h ahead and the alert-history one after
+  (`SHORT_HORIZON` in `airraid/backtest.py`, chosen on validation).
+* **Reproducibility**: the alert CSV is pinned to a dataset commit; Telegram posts get edited and
+  deleted, so the parsed events (no post text) are committed in `data/snapshot/` and used when no raw
+  download exists.
 * **Evaluation**: validation = 4 weeks before the test (used for choices), test = last 4 weeks (run
   once). The model is retrained every week on the previous 182 days and predicts the following week.
   Scores: Brier score, log loss, ROC AUC, calibration; Brier skill is relative to climatology.
@@ -142,9 +160,11 @@ sources/ (one adapter per source)        core (never sees a source name)
    way it was known at t, and requires identical values; a planted feature that peeks at the label is
    caught. On its first run the test caught countrywide counts that depended on which duplicate row of
    a post was kept.
-4. **Telegram edits.** Telegram shows the original publish time but the latest text. Text after "UPD"
-   is cut from edited posts (one post published 10:20 ended with "UPD 13:21: не фіксується").
-   Re-running with all edited posts removed (`--exclude-edited`) is a robustness check.
+4. **Telegram edits.** Telegram shows the original publish time but the latest text, and not when it
+   was edited. Edited posts (2 % / 14 % of posts, mostly map images in the second channel) are
+   **excluded**: the alert-map channel updates route summaries in place, so an edited post can carry
+   information from after its timestamp. (Text after "UPD" is also cut, e.g. a post published 10:20
+   ending with "UPD 13:21: не фіксується".)
 5. **The data snapshot.** The dump omits alerts still running when it was made (05:05 UTC), so data is
    treated as complete only until 00:00 UTC; hours after that have no label.
 6. **No hand-written knowledge of the test period** (no event dates, no feature chosen because of what
@@ -156,7 +176,8 @@ sources/ (one adapter per source)        core (never sees a source name)
 * The target is one volunteer source; the official one disagrees on ~19 % of oblast-hours.
 * Alerts with no all-clear message get a 30-minute end in the source (`naive`); that end is hindsight a
   real-time observer would not have had. Alerts longer than 12 h are cut at 12 h (missed all-clear).
-* Deleted Telegram posts are invisible; edited posts may carry later text not marked with "UPD".
+* Deleted Telegram posts are invisible. Excluding edited posts removes some genuine signal along with
+  the possible leaks.
 * The latest forecast is issued at the end of the alert snapshot (12 Oct 00:00 UTC), not "now".
 
 ## Repository
@@ -167,6 +188,7 @@ app.py              Streamlit GUI
 scripts/            one-off analyses (official vs volunteer alert data)
 tests/              leakage, Telegram rules, regions
 results/            predictions, metrics, forecast, data context (read by the GUI)
+data/snapshot/      parsed Telegram events (time, region, threat type; no text)
 ```
 
 Boundaries: [geoBoundaries](https://www.geoboundaries.org) UKR ADM1, © OpenStreetMap contributors, ODbL.

@@ -18,8 +18,16 @@ SOURCE_SETS = {
     "alertmap": ("povitryanatrivogaaa",),
     "both": ("kpszsu", "povitryanatrivogaaa"),
 }
-# Chosen on the validation weeks (best Brier skill at all 24 horizons); the test period was not used.
-MAIN_MODEL = "alertmap"
+# Main model, chosen on the validation weeks only (edited posts removed): the alert-map channel was
+# best for the next 1-3 hours, alert history alone for 4-24 hours.
+SHORT_HORIZON = 3
+MAIN_SHORT, MAIN_LONG = "alertmap", "none"
+
+
+def add_main_model(pred: pd.DataFrame) -> pd.DataFrame:
+    short = pred["h"] <= SHORT_HORIZON
+    pred["p_main"] = pred[f"p_gbm_{MAIN_SHORT}"].where(short, pred[f"p_gbm_{MAIN_LONG}"])
+    return pred
 
 
 def load_inputs(cfg: Config, signals: tuple[str, ...] | None = None) -> Inputs:
@@ -63,11 +71,11 @@ def run(cfg: Config, source_sets: dict[str, tuple[str, ...]] = SOURCE_SETS, log=
             pred[f"p_gbm_{name}"] = Boosting(srcs, cfg.seed).fit(train, train["y"]).predict(test)
             log(f"week {w:%Y-%m-%d} ({pred['period'].iat[0]}): gbm_{name} on {len(train)} rows ({time.time() - t1:.0f}s)")
         out.append(pred)
-    return pd.concat(out, ignore_index=True)
+    return add_main_model(pd.concat(out, ignore_index=True))
 
 
-def latest_forecast(cfg: Config, sources: tuple[str, ...]) -> pd.DataFrame:
-    """Train on everything labelled and forecast the 24 hours after the end of the data."""
+def latest_forecast(cfg: Config) -> pd.DataFrame:
+    """Train on everything labelled and forecast the 24 hours after the end of the data (main model)."""
     inputs = load_inputs(cfg)
     issue = cfg.data_end
     times = pd.date_range(issue - pd.Timedelta(days=cfg.train_days), issue, freq="h")
@@ -76,8 +84,9 @@ def latest_forecast(cfg: Config, sources: tuple[str, ...]) -> pd.DataFrame:
     train = expand(_rows_between(fs, times[0], train_end), cfg.horizons, sample=cfg.train_horizons_per_row,
                    seed=cfg.seed).dropna(subset=["y"])
     now = expand(_rows_between(fs, issue, issue + pd.Timedelta(hours=1)), cfg.horizons)
-    model = Boosting(sources, cfg.seed).fit(train, train["y"])
     out = now[["t", "region", "h"]].copy()
-    out["p"] = model.predict(now)
+    for name in (MAIN_SHORT, MAIN_LONG):
+        out[f"p_gbm_{name}"] = Boosting(SOURCE_SETS[name], cfg.seed).fit(train, train["y"]).predict(now)
+    out["p"] = add_main_model(out)["p_main"]
     out["p_climatology"] = now["clim_28d"].to_numpy()
     return out
