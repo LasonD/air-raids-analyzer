@@ -10,15 +10,17 @@ The GUI is the pipeline itself: the stages as clickable nodes, a **replay clock*
 hour of the last eight weeks, and every stage sees only what was published before it), and each stage
 drawing its data as it runs.
 
-![The pipeline while it runs](docs/screenshots/01_pipeline_running.png)
+![The pipeline after a run](docs/screenshots/01_pipeline_running.png)
 
-*Run all, at the Model stage: earlier stages are done (✓ with their time), the week of 7 Sep is scored
-(next hour +28 % against the usual daily rhythm), the week of 14 Sep is training.*
+*After ▶ Run all: every stage done (green bar, time). The Model view shows each week's model: what it was
+trained on (grey), the week it forecast (blue) and its next-hour score. While a stage runs its bar is
+blue and its view fills live; a stage whose inputs changed turns orange.*
 
-![Forecast after playing a day](docs/screenshots/02_forecast.png)
+![Forecast at a replay moment](docs/screenshots/02_forecast.png)
 
-*Forecast at 1 Oct 00:00 after ▷ Play stepped through the previous day: the chance of an alert per
-region, the outcome in hindsight (red outlines), and the week's forecasts checked so far.*
+*Forecast at 30 Sep 00:00 (an example "missed forecast" from the test weeks), with the outcome in
+hindsight (red outlines) and the week's forecasts checked so far. The clock moved, so Model asks to
+run again; the forecast reused that week's model.*
 
 ## Results (test period, 14 Sep – 12 Oct 2026, 380k forecasts)
 
@@ -85,8 +87,9 @@ live in tooltips and each stage's ⓘ.
 | Result | findings with 95 % ranges, what Telegram adds, warnings vs false alarms, regions | |
 
 **Run** runs one stage; **▶ Run all** runs them in order (about 2–3 minutes the first time, most of it
-training); **⚙ Inputs** switches the Telegram channels and model settings, and the stages that depend on
-them are marked "run again". Trained models are kept, so going back to a week costs nothing. With the
+training); **⚙ Inputs** switches the Telegram channels and model settings (the button reads "⚙ Changed"
+when they differ from the committed run), and the stages that depend on them are marked "run again".
+Charts are read-only (hover for values). Trained models are kept, so going back to a week costs nothing. With the
 committed settings the app's forecasts match `results/predictions.parquet` to 3·10⁻⁸
 (`tests/test_replay.py`).
 

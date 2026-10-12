@@ -23,7 +23,8 @@ GEOJSON = paths.ASSETS / "ukraine_adm1.geojson"
 KYIV = "Europe/Kyiv"
 CFG = Config()
 FIRST, LAST = CFG.val_start, CFG.data_end  # the replay clock moves inside the validation and test weeks
-NO_TOOLBAR = {"displayModeBar": False}
+# Read-only charts: no toolbar, no zoom (a zoom without its reset button cannot be undone); hover stays.
+NO_TOOLBAR = {"displayModeBar": False, "scrollZoom": False, "doubleClick": False}
 CHANNELS = {"povitryanatrivogaaa": "alert-map channel", "kpszsu": "Air Force channel"}
 SOURCE_NAMES = {"etryvoga": "Alert history", "kpszsu": "Air Force", "povitryanatrivogaaa": "Alert map"}
 
@@ -91,8 +92,8 @@ def runs() -> dict:
     return st.session_state.setdefault("runs", {})
 
 
-def record(stage: str, seconds: float, out=None) -> None:
-    runs()[stage] = {"sig": signature(stage), "seconds": seconds, "out": out}
+def record(stage: str, seconds: float, out=None, note: str = "") -> None:
+    runs()[stage] = {"sig": signature(stage), "seconds": seconds, "out": out, "note": note}
 
 
 def status(stage: str) -> str:
@@ -234,7 +235,9 @@ _KEYS = {"n": 0}
 def show(fig, height=None):
     """Plotly chart without toolbar; a fresh key each call so live updates can redraw the same slot."""
     _KEYS["n"] += 1
-    fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+    fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", dragmode=False)
+    fig.update_xaxes(fixedrange=True)
+    fig.update_yaxes(fixedrange=True)
     if height:
         fig.update_layout(height=height)
     st.plotly_chart(fig, use_container_width=True, config=NO_TOOLBAR, key=f"fig{_KEYS['n']}")

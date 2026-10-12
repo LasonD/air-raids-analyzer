@@ -25,7 +25,15 @@ STRIP: dict = {}  # stage -> status slot in the pipeline strip, filled live duri
 CSS = """<style>
 [data-testid="stMainBlockContainer"], .block-container {padding-top: 4.2rem; padding-bottom: 2rem;}
 .arrow {text-align: center; font-size: 1.5rem; color: #8a8985; line-height: 1;}
-[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stCaptionContainer"] {text-align: center;}
+.st-key-strip [data-testid="stHorizontalBlock"] {flex-wrap: nowrap !important;}
+.st-key-strip [data-testid="stColumn"] {min-width: 0 !important;}
+[class*="st-key-nodebox_"] {padding: 0.55rem 0.5rem 0.85rem !important; gap: 0.45rem !important; min-width: 0;}
+[class*="st-key-nodebox_"] [data-testid="stMarkdownContainer"] {width: 100%; margin: 0; padding: 0;}
+[class*="st-key-nodebox_"] button {padding: 0.3rem 0.2rem; min-height: 2.2rem; min-width: 0; max-width: 100%;}
+[class*="st-key-nodebox_"] button div, [class*="st-key-nodebox_"] button p {min-width: 0; max-width: 100%;}
+[class*="st-key-nodebox_"] button p {font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;}
+.st-key-topbar [data-testid="stColumn"] {min-width: 0 !important;}
+.st-key-topbar button {padding-left: 0.3rem; padding-right: 0.3rem;}
 </style>"""
 
 ABOUT = {
@@ -78,6 +86,7 @@ ABOUT = {
   forecast by a model trained only on earlier data. Ranges are 95%, from resampling whole days.
 - **% better**: Brier skill score against the usual daily rhythm. **No alert running**: moments when the region
   had no alert at forecast time, i.e. "will a new one start?".
+- Zakarpattia is left out of the region chart: it had no alerts in the test weeks, so there is nothing to beat.
 - Limits: the target is one volunteer record; beyond a few hours the forecast stays close to the usual daily
   rhythm; Ivano-Frankivsk and Chernihiv were worse than it in the test weeks; live posts cannot be used yet.""",
 }
@@ -109,17 +118,22 @@ def top_bar() -> dict:
     a.markdown("#### Air raid alerts in Ukraine · 24-hour forecast pipeline")
     b.caption(f"Research prototype, not a warning service · data until {C.kyiv(C.LAST)} Kyiv",
               help="A replay of the last eight weeks of real data. Always follow official air raid alerts.")
-    c = st.columns([2.2, 1.1, 0.8, 0.8, 0.8, 0.8, 1.5, 1.3, 1.5], vertical_alignment="bottom")
+    c = st.container(key="topbar").columns([1.75, 1.35, 0.7, 0.7, 0.7, 0.7, 1.3, 1.3, 1.35],
+                                            vertical_alignment="bottom")
     c[0].date_input("Now (Kyiv)", key="clock_day", min_value=C.FIRST.tz_convert(C.KYIV).date(),
                     max_value=C.LAST.tz_convert(C.KYIV).date(), on_change=_clock_from_widgets, format="DD.MM.YYYY",
                     help="The replay clock: every stage sees only what was published before this moment.")
     c[1].selectbox("Hour", list(range(24)), key="clock_hour", format_func=lambda h: f"{h:02d}:00",
                    on_change=_clock_from_widgets)
-    for col, (label, hours) in zip(c[2:6], (("◀ 1 d", -24), ("◀ 1 h", -1), ("1 h ▶", 1), ("1 d ▶", 24))):
-        col.button(label, on_click=_step, args=(hours,), use_container_width=True, key=f"step_{hours}")
-    play = c[6].button("▷ Play 24 h", use_container_width=True,
+    for col, (label, hours) in zip(c[2:6], (("−1d", -24), ("−1h", -1), ("+1h", 1), ("+1d", 24))):
+        col.button(label, on_click=_step, args=(hours,), use_container_width=True, key=f"step_{hours}",
+                   help=f"Move the clock {'back' if hours < 0 else 'forward'} {abs(hours) // 24 or abs(hours)} "
+                        f"{'day' if abs(hours) == 24 else 'hour'}")
+    play = c[6].button("▷ Play", use_container_width=True,
                        help="Step the clock an hour at a time for a day and watch the forecast update. Any click stops it.")
-    with c[7].popover("⚙ Inputs", use_container_width=True):
+    changed = C.settings() != P.Settings() or st.session_state.get("n_weeks") != C.DEFAULTS["n_weeks"]
+    with c[7].popover("⚙ Changed" if changed else "⚙ Inputs", use_container_width=True,
+                      help="Inputs differ from the committed run" if changed else "Telegram channels and model settings"):
         st.caption("The alert history is always used: it is what is forecast.")
         for ch, name in C.CHANNELS.items():
             st.toggle(f"{name.capitalize()} (@{ch})", key=f"ch_{ch}")
@@ -133,29 +147,40 @@ def top_bar() -> dict:
     return {"play": play, "run_all": run_all}
 
 
-def node_status(stage: str, text: str | None = None) -> None:
+STATE_COLOR = {"not run": "#a3a29e", "running": C.BLUE, "done": C.AQUA, "out of date": "#e07b1a", "result": C.GREY}
+def node_status(stage: str, text: str | None = None, state: str | None = None) -> None:
     if text is None:
+        r = C.runs().get(stage)
         if stage == "result":
-            text = "● committed run"
+            state, text = "result", "● committed run"
         else:
-            state, r = C.status(stage), C.runs().get(stage)
-            text = f"✓ {r['seconds']:.1f} s" if state == "done" else {"not run": "○ not run", "out of date": "⚠ run again"}[state]
-    STRIP[stage].caption(text)
+            state = C.status(stage)
+            if state == "done":
+                text = f"✓ {r['seconds']:.1f} s" + (f" · {r['note']}" if r.get("note") else "")
+            else:
+                text = {"not run": "○ not run", "out of date": "⚠ run again"}[state]
+    # Colour bar and text in one element, so they always change together; one line, cut with "…",
+    # so every node keeps the same height.
+    color = STATE_COLOR[state]
+    STRIP[stage].markdown(
+        f"<div style='padding:0 2px'><div style='height:4px;border-radius:2px;background:{color};margin:0 0 6px 0'></div>"
+        f"<div title='{text}' style='color:{color};font-size:0.82rem;line-height:1.3;text-align:center;"
+        f"white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>{text}</div></div>", unsafe_allow_html=True)
 
 
 def running(stage: str, text: str) -> None:
-    node_status(stage, f"⏳ {text}")
+    node_status(stage, f"⏳ {text}", "running")
 
 
 def strip():
     widths = []
     for i in range(len(ORDER)):
-        widths += [3, 0.5] if i < len(ORDER) - 1 else [3]
-    cols = st.columns(widths, vertical_alignment="center")
+        widths += [3, 0.35] if i < len(ORDER) - 1 else [3]
+    cols = st.container(key="strip").columns(widths, vertical_alignment="center")
     sel = C.selected()
     for i, stage in enumerate(ORDER):
         title, tip = C.STAGES[stage]
-        with cols[2 * i].container(border=True):
+        with cols[2 * i].container(border=True, key=f"nodebox_{stage}"):
             st.button(title, key=f"node_{stage}", on_click=C.select, args=(stage,), help=tip,
                       use_container_width=True, type="primary" if stage == sel else "secondary")
             STRIP[stage] = st.empty()
@@ -563,7 +588,7 @@ def v_model(run: bool) -> None:
         with st.spinner("Building features from the data known at 'now'…"):
             running("model", "features")
             fs = C.features_now(s)
-        out = []
+        out, reused = [], sum(C.has_models(s, w) for w, _ in blocks)
         for i, (w, end) in enumerate(blocks):
             states[w], labels[w] = "training", "training…"
             with chart.container():
@@ -573,7 +598,9 @@ def v_model(run: bool) -> None:
             out.append(pred)
             states[w], labels[w] = "done", week_skill(pred)
         log.empty()
-        C.record("model", time.time() - t0, out=pd.concat(out, ignore_index=True))
+        C.record("model", time.time() - t0, out=pd.concat(out, ignore_index=True),
+                 note="models reused" if reused == len(blocks) else "")
+        C.runs()["model"].update(blocks=blocks, t=t, s=s)  # what this run covered, to draw it as it was
     r = C.runs().get("model")
     if r is None:
         with chart.container():
@@ -581,6 +608,7 @@ def v_model(run: bool) -> None:
         hint(f"Run trains {2 if s.channels else 1} model(s) per week on the data before it and scores its forecasts.")
         return
     pred = r["out"]
+    blocks, t, s = r.get("blocks", blocks), r.get("t", t), r.get("s", s)  # the run as made, even if out of date
     starts = [w for w, _ in blocks]
     pos = pd.DatetimeIndex(starts).searchsorted(pred["t"], side="right") - 1
     labels = {starts[i]: week_skill(g) for i, g in pred.groupby(pos)}
@@ -588,6 +616,10 @@ def v_model(run: bool) -> None:
         C.show(walk_chart(s, t, blocks, {w: "done" for w in labels}, labels))
     if C.status("model") == "out of date":
         st.caption("⚠ The clock or the inputs changed since this run.")
+    elif r.get("note"):
+        st.markdown(":gray-badge[♻ models reused]", help="A week's model depends only on the data before that week, "
+                    "never on the clock, so models trained in an earlier run (by anyone using this app) are kept and "
+                    "reused; this run only built the features and scored the forecasts.")
     q = pred[pred["active_now"] == 0]
     h1, q1, longer = pred[pred["h"] == 1], q[q["h"] == 1], pred[pred["h"] >= 4]
     m = st.columns(4)
@@ -601,7 +633,7 @@ def v_model(run: bool) -> None:
                 help="Telegram model minus alert-history model, moments with no alert running")
     rows = []
     for subset, g in (("all moments", pred), ("no alert running", q)):
-        for h, gh in g.groupby("h"):
+        for h, gh in g[g["h"] >= 2].groupby("h"):
             rows.append({"subset": subset, "h": h, "skill": C.skill(gh["y"], gh["p_main"], gh["p_climatology"])})
     tab = pd.DataFrame(rows)
     same = pred.merge(C.ref()["pred"][["t", "region", "h", "p_main"]], on=["t", "region", "h"], suffixes=("", "_ref"))
@@ -613,7 +645,7 @@ def v_model(run: bool) -> None:
     fig.add_hline(y=0, line=dict(color=C.GREY, width=1, dash="dot"))
     fig.update_layout(legend=dict(orientation="h", y=-0.3), xaxis=dict(title="hours ahead", dtick=2),
                       yaxis=dict(tickformat=".0%"))
-    C.show(C.small(fig, 280, "% better than the usual daily rhythm, by hours ahead"))
+    C.show(C.small(fig, 280, "2–24 h ahead: % better than usual rhythm"))
     if len(same):
         diff = float((same["p_main"] - same["p_main_ref"]).abs().max())
         ok = diff < 1e-6
@@ -657,11 +689,13 @@ def compute_forecast(say) -> None:
     t0 = time.time()
     fs = C.features_now(s)
     week = P.week_of(s.config(), t)
+    cached = C.has_models(s, week)
     short, long = C.models(fs, s, week, log=lambda m: (say(m), running("forecast", "training")))
     fc = P.predict(fs, s, short, long, t, t + P.HOUR)
     so_far = (P.predict(fs, s, short, long, week, t - pd.Timedelta(hours=23)).dropna(subset=["y"])
               if t - pd.Timedelta(hours=23) > week else pd.DataFrame())
-    C.record("forecast", time.time() - t0, out={"fc": fc, "so_far": so_far, "week": week})
+    C.record("forecast", time.time() - t0, out={"fc": fc, "so_far": so_far, "week": week},
+             note="model reused" if cached else "")
 
 
 def draw_forecast(map_slot, side_slot, h: int, rhythm: bool, hindsight: bool, region: int) -> None:
@@ -740,19 +774,20 @@ def decision(test: pd.DataFrame) -> None:
     q = test[(test["h"] == 1) & (test["active_now"] == 0)]
     days = q["t"].dt.floor("D").nunique()
     thr = st.slider("Warn a region when the chance of a new alert next hour is at least", 0.05, 0.9, 0.3, 0.05,
-                    help="Test weeks, moments with no alert running. Both rows raise the same number of warnings.")
+                    key="warn_thr")
     n = int((q["p_main"] >= thr).sum())
+    st.caption(f"{n / days:.0f} warnings a day for both rows", help="Test weeks, moments with no alert running. The "
+               "usual daily rhythm gets the same number of warnings (its top picks), so the rows compare where each "
+               "one puts them.")
     rows = []
     for col, label in (("p_main", "Forecast"), ("p_climatology", "Usual daily rhythm")):
         warn = q[col].rank(method="first", ascending=False) <= n  # same number of warnings for both
         hit = (warn & (q["y"] == 1)).sum()
         rows.append({"based on": label, "alerts caught": hit / max((q["y"] == 1).sum(), 1),
-                     "warnings / day": warn.sum() / days, "false alarms / day": (warn & (q["y"] == 0)).sum() / days,
-                     "came true": hit / max(warn.sum(), 1)})
+                     "false alarms / day": (warn & (q["y"] == 0)).sum() / days, "came true": hit / max(warn.sum(), 1)})
     st.dataframe(pd.DataFrame(rows), hide_index=True, column_config={
         "alerts caught": st.column_config.NumberColumn(format="percent"),
         "came true": st.column_config.NumberColumn(format="percent"),
-        "warnings / day": st.column_config.NumberColumn(format="%.0f"),
         "false alarms / day": st.column_config.NumberColumn(format="%.0f")})
 
 
@@ -786,7 +821,7 @@ def v_result(run: bool) -> None:
         fig.add_hline(y=0, line=dict(color=C.GREY, width=1, dash="dot"))
         fig.update_layout(legend=dict(orientation="h", y=-0.3), xaxis=dict(title="hours ahead", dtick=2),
                           yaxis=dict(tickformat=".0%"))
-        C.show(C.small(fig, 300, "2–24 hours ahead: % better than the usual daily rhythm (95% band)"))
+        C.show(C.small(fig, 300, "2–24 h ahead: % better than usual rhythm"))
     with b:
         fig = go.Figure()
         for period, color, dash in (("validation", C.GREY, "dash"), ("test", C.BLUE, "solid")):
@@ -802,7 +837,7 @@ def v_result(run: bool) -> None:
         fig.add_vline(x=SHORT_HORIZON + 0.5, line=dict(color=C.GREY, width=1))
         fig.update_layout(legend=dict(orientation="h", y=-0.3), xaxis=dict(title="hours ahead", dtick=2),
                           yaxis=dict(tickformat="+.1%"))
-        C.show(C.small(fig, 300, "What Telegram adds (no alert running) → used up to 3 h ahead"))
+        C.show(C.small(fig, 300, "What Telegram adds → used up to 3 h"))
     a, b = st.columns([3, 2])
     with a:
         decision(test)
@@ -814,7 +849,7 @@ def v_result(run: bool) -> None:
                                marker_color=np.where(br["brier_skill"] > 0, C.BLUE, C.GREY),
                                hovertemplate="%{y}: %{x:.1%}<extra></extra>"))
         fig.update_layout(xaxis=dict(tickformat=".0%"), yaxis=dict(tickfont=dict(size=10)))
-        C.show(C.small(fig, 420, "By region (grey = worse than the rhythm; Zakarpattia had no alerts)"))
+        C.show(C.small(fig, 420, "By region (grey = worse than rhythm)"))
     r = C.runs().get("model")
     if r is not None and len(r["out"]):
         st.caption("Stage 5 holds your own run of the model with the current inputs; this page is the committed run.")
