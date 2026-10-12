@@ -25,16 +25,60 @@ STRIP: dict = {}  # stage -> status slot in the pipeline strip, filled live duri
 CSS = """<style>
 [data-testid="stMainBlockContainer"], .block-container {padding-top: 4.2rem; padding-bottom: 2rem;}
 .arrow {text-align: center; font-size: 1.5rem; color: #8a8985; line-height: 1;}
-.st-key-strip [data-testid="stHorizontalBlock"] {flex-wrap: nowrap !important;}
-.st-key-strip [data-testid="stColumn"] {min-width: 0 !important;}
+@media (min-width: 641px) {
+  .st-key-strip [data-testid="stHorizontalBlock"] {flex-wrap: nowrap !important;}
+  .st-key-strip [data-testid="stColumn"] {min-width: 0 !important;}
+  .st-key-topbar [data-testid="stColumn"] {min-width: 0 !important;}
+}
+/* Phones: the strip scrolls sideways instead of stacking; the top bar wraps into short rows. */
+@media (max-width: 640px) {
+  .st-key-strip [data-testid="stHorizontalBlock"] {flex-wrap: nowrap !important; overflow-x: auto; padding-bottom: 0.3rem;}
+  .st-key-strip [data-testid="stColumn"]:nth-child(odd) {flex: 0 0 7.5rem !important; min-width: 7.5rem !important;}
+  .st-key-strip [data-testid="stColumn"]:nth-child(even) {flex: 0 0 1.2rem !important; min-width: 1.2rem !important;}
+  .st-key-topbar [data-testid="stHorizontalBlock"] {flex-wrap: wrap !important; gap: 0.5rem !important;}
+  .st-key-topbar [data-testid="stColumn"] {flex: 1 1 calc(25% - 0.5rem) !important; min-width: calc(25% - 0.5rem) !important;}
+  .st-key-topbar [data-testid="stColumn"]:nth-child(-n+2) {flex-basis: calc(50% - 0.5rem) !important; min-width: calc(50% - 0.5rem) !important;}
+  .st-key-topbar [data-testid="stColumn"]:nth-child(n+7) {flex-basis: calc(33% - 0.5rem) !important; min-width: calc(33% - 0.5rem) !important;}
+}
 [class*="st-key-nodebox_"] {padding: 0.55rem 0.5rem 0.85rem !important; gap: 0.45rem !important; min-width: 0;}
 [class*="st-key-nodebox_"] [data-testid="stMarkdownContainer"] {width: 100%; margin: 0; padding: 0;}
 [class*="st-key-nodebox_"] button {padding: 0.3rem 0.2rem; min-height: 2.2rem; min-width: 0; max-width: 100%;}
 [class*="st-key-nodebox_"] button div, [class*="st-key-nodebox_"] button p {min-width: 0; max-width: 100%;}
 [class*="st-key-nodebox_"] button p {font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;}
-.st-key-topbar [data-testid="stColumn"] {min-width: 0 !important;}
 .st-key-topbar button {padding-left: 0.3rem; padding-right: 0.3rem;}
 </style>"""
+
+# Hover tips in plain CSS for buttons that rerun the app: Streamlit's own tooltip stays on screen when a click
+# reruns the page under the mouse.
+BUTTON_TIPS = {
+    **{f"node_{k}": tip for k, (_, tip) in C.STAGES.items()},
+    **{f"step_{h}": f"Move the clock {'back' if h < 0 else 'forward'} 1 {'day' if abs(h) == 24 else 'hour'}"
+       for h in (-24, -1, 1, 24)},
+    "play": "Step the clock an hour at a time for a day and watch the forecast update. Any click stops it.",
+    "run_all": "Run every stage in order for this moment and these inputs, watching each one fill.",
+    **{f"live_{k}": "Read the newest page of each channel straight from Telegram (about 20 posts each)."
+       for k in (True, False)},
+}
+RIGHT_TIPS = {"node_forecast", "node_result", "play", "run_all"}  # anchored right so they stay on screen
+
+
+def _tips_css() -> str:
+    keys = [f".st-key-{k}" for k in BUTTON_TIPS]
+    after, hover = ", ".join(f"{k}::after" for k in keys), ", ".join(f"{k}:hover::after" for k in keys)
+    text = "".join(f'.st-key-{k}::after {{content: "{v.replace(chr(34), chr(39))}"; '
+                   f'{"right" if k in RIGHT_TIPS else "left"}: 0;}}\n' for k, v in BUTTON_TIPS.items())
+    return f"""<style>
+{", ".join(keys)} {{position: relative;}}
+{after} {{position: absolute; top: calc(100% + 6px); z-index: 1000; width: max-content; max-width: 16rem;
+  padding: 0.4rem 0.6rem; border-radius: 0.4rem; background: rgba(38, 39, 48, 0.95); color: #fff;
+  border: 1px solid rgba(250, 250, 250, 0.15); font-size: 0.8rem; line-height: 1.35; font-weight: 400;
+  white-space: normal; text-align: left; pointer-events: none; opacity: 0; visibility: hidden;
+  transition: opacity 0.12s, visibility 0s;}}
+{hover} {{opacity: 1; visibility: visible; transition-delay: 0.5s;}}
+{text}</style>"""
+
+
+CSS += _tips_css()
 
 ABOUT = {
     "sources": """
@@ -126,11 +170,8 @@ def top_bar() -> dict:
     c[1].selectbox("Hour", list(range(24)), key="clock_hour", format_func=lambda h: f"{h:02d}:00",
                    on_change=_clock_from_widgets)
     for col, (label, hours) in zip(c[2:6], (("−1d", -24), ("−1h", -1), ("+1h", 1), ("+1d", 24))):
-        col.button(label, on_click=_step, args=(hours,), use_container_width=True, key=f"step_{hours}",
-                   help=f"Move the clock {'back' if hours < 0 else 'forward'} {abs(hours) // 24 or abs(hours)} "
-                        f"{'day' if abs(hours) == 24 else 'hour'}")
-    play = c[6].button("▷ Play", use_container_width=True,
-                       help="Step the clock an hour at a time for a day and watch the forecast update. Any click stops it.")
+        col.button(label, on_click=_step, args=(hours,), use_container_width=True, key=f"step_{hours}")
+    play = c[6].button("▷ Play", use_container_width=True, key="play")
     changed = C.settings() != P.Settings() or st.session_state.get("n_weeks") != C.DEFAULTS["n_weeks"]
     with c[7].popover("⚙ Changed" if changed else "⚙ Inputs", use_container_width=True,
                       help="Inputs differ from the committed run" if changed else "Telegram channels and model settings"):
@@ -142,8 +183,7 @@ def top_bar() -> dict:
         st.checkbox("Leave out edited Telegram posts", key="exclude_edited")
         st.slider("Weeks to score", 1, 8, key="n_weeks")
         st.button("Reset to the committed settings", on_click=_reset, use_container_width=True)
-    run_all = c[8].button("▶ Run all", type="primary", use_container_width=True,
-                          help="Run every stage in order for this moment and these inputs, watching each one fill.")
+    run_all = c[8].button("▶ Run all", type="primary", use_container_width=True, key="run_all")
     return {"play": play, "run_all": run_all}
 
 
@@ -181,7 +221,7 @@ def strip():
     for i, stage in enumerate(ORDER):
         title, tip = C.STAGES[stage]
         with cols[2 * i].container(border=True, key=f"nodebox_{stage}"):
-            st.button(title, key=f"node_{stage}", on_click=C.select, args=(stage,), help=tip,
+            st.button(title, key=f"node_{stage}", on_click=C.select, args=(stage,),
                       use_container_width=True, type="primary" if stage == sel else "secondary")
             STRIP[stage] = st.empty()
             node_status(stage)
@@ -261,8 +301,7 @@ def raw_alert_rows() -> pd.DataFrame:
 def live_posts_block(parsed: bool) -> None:
     live = st.session_state.get("live")
     a, b = st.columns([1.4, 5], vertical_alignment="center")
-    if a.button("📡 Newest posts", key=f"live_{parsed}", use_container_width=True,
-                help="Read the newest page of each channel straight from Telegram (about 20 posts each)."):
+    if a.button("📡 Newest posts", key=f"live_{parsed}", use_container_width=True):
         try:
             with st.spinner("Asking t.me…"):
                 S.fetch_live()
@@ -368,18 +407,23 @@ def parse_live() -> None:
     C.record("parsing", time.time() - t0)
 
 
+def _pg_edited():
+    st.session_state["pg_pick_w"] = None  # a typed post is no longer the highlighted example
+
+
 def playground() -> None:
-    pick = st.pills("Example", [f"{C.CHANNELS[ch]}: {name}" for ch, name in EXAMPLES], default=None,
-                    label_visibility="collapsed")
+    labels = [f"{C.CHANNELS[ch]}: {name}" for ch, name in EXAMPLES]
     # Kept in plain session keys: Streamlit drops a widget's own state while its view is not shown.
     ss = st.session_state
+    ss.setdefault("pg_pick_w", ss.get("pg_pick", labels[0]))
+    pick = st.pills("Example", labels, key="pg_pick_w", label_visibility="collapsed")
     if pick and pick != ss.get("pg_pick"):  # load an example once, then let the user edit it
         ch, name = next(k for k in EXAMPLES if f"{C.CHANNELS[k[0]]}: {k[1]}" == pick)
         ss["pg_value"], ss["pg_ch_value"] = EXAMPLES[(ch, name)], ch
     ss["pg_pick"] = pick
     a, b = st.columns([3, 2])
     text = a.text_area("Try a post", value=ss.setdefault("pg_value", next(iter(EXAMPLES.values()))), height=110,
-                       help="Real posts from October 2026, or type your own; the same rules run on every post.")
+                       on_change=_pg_edited, help="Real posts from October 2026, or type your own; the same rules run on every post.")
     channels = list(C.CHANNELS)
     channel = b.selectbox("Channel rules", channels, index=channels.index(ss.setdefault("pg_ch_value", channels[0])),
                           format_func=C.CHANNELS.get)
@@ -408,7 +452,7 @@ def v_parsing(run: bool) -> None:
             st.caption(" · ".join(f"{k}: {v:.0%} of threat posts name a region" for k, v in stats.items()))
         with b:
             ch = st.segmented_control("Channel", list(parsed), default=list(parsed)[-1], format_func=C.CHANNELS.get,
-                                      key="parse_channel", label_visibility="collapsed") or list(parsed)[-1]
+                                      key="parse_channel", label_visibility="collapsed", required=True) or list(parsed)[-1]
             p = parsed[ch]
             p = p[p["published_at_utc"] < t].tail(12).iloc[::-1]
             st.dataframe(pd.DataFrame({
@@ -473,7 +517,7 @@ def v_format(run: bool) -> None:
     a, b = st.columns([3, 2], vertical_alignment="bottom")
     region = a.selectbox("Region", names, index=CODES.index("UA-63"), key="fmt_region", label_visibility="collapsed")
     hours = b.segmented_control("Window", [12, 24, 48], default=24, format_func=lambda h: f"last {h} h",
-                                key="fmt_hours", label_visibility="collapsed") or 24
+                                key="fmt_hours", label_visibility="collapsed", required=True) or 24
     C.show(timeline(CODES[names.index(region)], t - pd.Timedelta(hours=hours), t))
     H = S.hourly(t, s.max_alert_hours)
     last = H[H.index >= t - pd.Timedelta(hours=48)]
@@ -738,7 +782,8 @@ def v_forecast(run: bool, play: bool = False) -> None:
     names = [BY_CODE[c].name for c in CODES]
     c = st.columns([2.2, 1.6, 1.2, 1.4, 1.6], vertical_alignment="bottom")
     h = c[0].slider("Hours ahead", 1, 24, 1, help="1 = the hour right after the forecast is made.")
-    rhythm = c[1].segmented_control("Colour by", ["Forecast", "Usual rhythm"], default="Forecast") == "Usual rhythm"
+    rhythm = c[1].segmented_control("Colour by", ["Forecast", "Usual rhythm"], default="Forecast",
+                                    required=True) == "Usual rhythm"
     hindsight = c[2].toggle("What happened", help="Hindsight: outcomes after 'now', never seen by the model.")
     region = names.index(c[3].selectbox("Region", names, index=CODES.index("UA-30"), key="fc_region"))
     c[4].selectbox("Jump to", list(PRESET_RULES), index=None, key="jump", on_change=_jump, placeholder="an example…",
