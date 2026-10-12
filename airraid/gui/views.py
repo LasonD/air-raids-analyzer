@@ -35,7 +35,6 @@ CSS = """<style>
   .st-key-strip [data-testid="stHorizontalBlock"] {flex-wrap: nowrap !important; overflow-x: auto; padding-bottom: 0.3rem;}
   .st-key-strip [data-testid="stColumn"]:nth-child(odd) {flex: 0 0 7.5rem !important; min-width: 7.5rem !important;}
   .st-key-strip [data-testid="stColumn"]:nth-child(even) {flex: 0 0 1.2rem !important; min-width: 1.2rem !important;}
-  .st-key-strip [data-testid="stColumn"]:has(.st-key-branches) {flex: 0 0 15rem !important; min-width: 15rem !important;}
   .st-key-topbar [data-testid="stHorizontalBlock"] {flex-wrap: wrap !important; gap: 0.5rem !important;}
   .st-key-topbar [data-testid="stColumn"] {flex: 1 1 calc(25% - 0.5rem) !important; min-width: calc(25% - 0.5rem) !important;}
   .st-key-topbar [data-testid="stColumn"]:nth-child(-n+2) {flex-basis: calc(50% - 0.5rem) !important; min-width: calc(50% - 0.5rem) !important;}
@@ -48,10 +47,6 @@ CSS = """<style>
 [class*="st-key-nodebox_"] button p {font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;}
 .st-key-topbar button {padding-left: 0.3rem; padding-right: 0.3rem;}
 .st-key-branches {gap: 0.35rem !important;}
-.st-key-branches [class*="st-key-nodebox_"] {padding: 0.3rem 0.45rem !important; gap: 0.5rem !important;
-  flex-wrap: nowrap !important;}
-.st-key-branches [class*="st-key-nodebox_"] > div:first-child {flex: 0 0 52% !important; min-width: 0;}
-.st-key-branches [class*="st-key-nodebox_"] > div:nth-child(2) {flex: 1 1 0 !important; min-width: 0;}
 .st-key-panel {border-top: 1px solid rgba(128, 128, 128, 0.3); padding-top: 0.9rem; margin-top: 0.5rem;}
 </style>"""
 
@@ -289,9 +284,8 @@ def show_log(stage: str) -> bool:
     return True
 
 
-def node(col, stage: str, compact: bool = False) -> None:
-    # Compact = name and status on one line, so three parallel nodes stack to about the height of two.
-    with col.container(border=True, key=f"nodebox_{stage}", horizontal=compact, vertical_alignment="center"):
+def node(col, stage: str) -> None:
+    with col.container(border=True, key=f"nodebox_{stage}"):
         st.button(C.STAGES[stage][0], key=f"node_{stage}", on_click=C.select, args=(stage,),
                   use_container_width=True, type="primary" if stage == C.selected() else "secondary")
         STRIP[stage] = st.empty()
@@ -304,13 +298,13 @@ def arrow(col) -> None:
 
 def strip():
     # One chain (Sources → Parsing → Format), then three parallel branches that each need only Format.
-    cols = st.container(key="strip").columns([3, 0.35, 3, 0.35, 3, 0.35, 4.6, 0.35, 3], vertical_alignment="center")
+    cols = st.container(key="strip").columns([3, 0.35, 3, 0.35, 3, 0.35, 3, 0.35, 3], vertical_alignment="center")
     for i, stage in enumerate(ORDER[:3]):
         node(cols[2 * i], stage)
         arrow(cols[2 * i + 1])
     with cols[6].container(key="branches"):
         for stage in ORDER[3:6]:
-            node(st, stage, compact=True)
+            node(st, stage)
     arrow(cols[7])
     node(cols[8], ORDER[6])
     return st.empty()
