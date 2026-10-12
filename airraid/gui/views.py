@@ -206,12 +206,20 @@ def top_bar() -> dict:
     return {"play": play, "run_all": run_all}
 
 
-STATE_COLOR = {"not run": "#a3a29e", "running": C.BLUE, "done": C.AQUA, "out of date": "#e07b1a", "result": C.GREY}
+STATE_COLOR = {"not run": "#a3a29e", "queued": "#a3a29e", "running": C.BLUE, "done": C.AQUA, "out of date": "#e07b1a",
+               "result": C.GREY}
+
+
+def queued() -> list:
+    """Stages waiting in the run queue; the first entry is the one running in this script run."""
+    return (st.session_state.get("queue") or [])[1:]
 def node_status(stage: str, text: str | None = None, state: str | None = None) -> None:
     if text is None:
         r = C.runs().get(stage)
         if stage == "result":
             state, text = "result", "● committed run"
+        elif stage in queued():
+            state, text = "queued", "◌ queued"
         else:
             state = C.status(stage)
             if state == "done":
@@ -298,7 +306,10 @@ def arrow(col) -> None:
 
 def strip():
     # One chain (Sources → Parsing → Format), then three parallel branches that each need only Format.
-    cols = st.container(key="strip").columns([3, 0.35, 3, 0.35, 3, 0.35, 3, 0.35, 3], vertical_alignment="center")
+    strip_box = st.container(key="strip")
+    # Faded while waiting in the queue; redrawn every script run, so it follows the queue.
+    strip_box.html("<style>" + "".join(f".st-key-nodebox_{k} {{opacity: 0.5;}}" for k in queued()) + "</style>")
+    cols = strip_box.columns([3, 0.35, 3, 0.35, 3, 0.35, 3, 0.35, 3], vertical_alignment="center")
     for i, stage in enumerate(ORDER[:3]):
         node(cols[2 * i], stage)
         arrow(cols[2 * i + 1])
