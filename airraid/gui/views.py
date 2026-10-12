@@ -378,12 +378,11 @@ LANDING = f"""
   <h1>Air raid alerts in Ukraine</h1>
   <p class="sub">A 24-hour forecast pipeline</p>
   <p>The chance of an air raid alert in each of Ukraine's 24 regions, hour by hour for the next day, learned
-  from the alert history and two public Telegram channels. Replay any moment of the last weeks and run every
-  step from raw data to the result.</p>
+  from the alert history and two public Telegram channels. Run every step, from raw data to the result.</p>
   <div class="facts">
     <div><b>24 × 24</b><span>regions × hours ahead</span></div>
     <div><b>3 sources</b><span>alert history, Air Force, alert map</span></div>
-    <div><b>__NEXT_HOUR__ better</b><span>next hour, than the usual daily rhythm</span></div>
+    <div><b>Any hour</b><span>replay the last 8 weeks, as known then</span></div>
   </div>
 </div>
 <style>
@@ -403,8 +402,7 @@ def _enter():
 
 
 def landing() -> None:
-    nh = C.ci(C.ref()["unc"], "main_vs_climatology", "test", "all", 1)[0]  # the committed test result
-    st.html(LANDING.replace("__NEXT_HOUR__", f"{nh:.0%}"))
+    st.html(LANDING)
     _, mid, _ = st.columns([1, 1, 1])
     mid.button("Open the pipeline →", type="primary", use_container_width=True, on_click=_enter, key="enter")
     st.html("<p style='text-align:center;color:#8a8985;font-size:0.85rem;margin-top:1rem'>Research prototype, "
