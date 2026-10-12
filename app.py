@@ -16,7 +16,7 @@ st.html(V.CSS)
 top = V.top_bar()
 # "Run all" is a queue worked off one stage per script run, so each stage starts on a clean screen.
 if top["run_all"]:
-    st.session_state["queue"] = V.ORDER[:-1]
+    V.enqueue(V.ORDER[:-1], then="result")
 queue = st.session_state.get("queue") or []
 if queue:
     C.select(queue[0])
@@ -26,13 +26,14 @@ bar = V.strip()
 panel = st.container(key="panel")
 
 if queue:
-    done = len(V.ORDER) - 1 - len(queue)
-    bar.progress(done / (len(V.ORDER) - 1), f"Running {C.STAGES[queue[0]][0]} ({done + 1} of {len(V.ORDER) - 1})")
+    total = st.session_state.get("queue_total", len(queue))
+    done = total - len(queue)
+    bar.progress(done / total, f"Running {C.STAGES[queue[0]][0]} ({done + 1} of {total})")
     with panel:
         V.render(queue[0], run=True)
     st.session_state["queue"] = queue[1:]
     if not queue[1:]:
-        C.select("result")
+        C.select(st.session_state.get("queue_then", "result"))
     st.rerun()
 elif top["play"]:
     with panel:

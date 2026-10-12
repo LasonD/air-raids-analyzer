@@ -35,6 +35,8 @@ CSS = """<style>
   .st-key-strip [data-testid="stHorizontalBlock"] {flex-wrap: nowrap !important; overflow-x: auto; padding-bottom: 0.3rem;}
   .st-key-strip [data-testid="stColumn"]:nth-child(odd) {flex: 0 0 7.5rem !important; min-width: 7.5rem !important;}
   .st-key-strip [data-testid="stColumn"]:nth-child(even) {flex: 0 0 1.2rem !important; min-width: 1.2rem !important;}
+  .st-key-strip [data-testid="stColumn"]:has(.st-key-branches) {flex: 0 0 24rem !important; min-width: 24rem !important;}
+  .st-key-strip .st-key-branches [data-testid="stColumn"] {flex: 1 1 0 !important; min-width: 6.5rem !important;}
   .st-key-topbar [data-testid="stHorizontalBlock"] {flex-wrap: wrap !important; gap: 0.5rem !important;}
   .st-key-topbar [data-testid="stColumn"] {flex: 1 1 calc(25% - 0.5rem) !important; min-width: calc(25% - 0.5rem) !important;}
   .st-key-topbar [data-testid="stColumn"]:nth-child(-n+2) {flex-basis: calc(50% - 0.5rem) !important; min-width: calc(50% - 0.5rem) !important;}
@@ -46,8 +48,21 @@ CSS = """<style>
 [class*="st-key-nodebox_"] button div, [class*="st-key-nodebox_"] button p {min-width: 0; max-width: 100%;}
 [class*="st-key-nodebox_"] button p {font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;}
 .st-key-topbar button {padding-left: 0.3rem; padding-right: 0.3rem;}
+.st-key-branches {border-style: dashed !important; padding: 0.3rem 0.45rem 0.45rem !important; gap: 0.2rem !important;}
+.branch-label {text-align: center; font-size: 0.75rem; color: #8a8985; line-height: 1.2;}
+.st-key-strip .st-key-branches [data-testid="stColumn"] {flex: 1 1 0 !important; min-width: 0 !important;}
 .st-key-panel {border-top: 1px solid rgba(128, 128, 128, 0.3); padding-top: 0.9rem; margin-top: 0.5rem;}
 </style>"""
+
+# The stages each one really takes its data from. Patterns and Model are side branches: Forecast needs neither.
+NEEDS = {"parsing": ["sources"], "format": ["sources", "parsing"], "patterns": ["sources", "parsing", "format"],
+         "model": ["sources", "parsing", "format"], "forecast": ["sources", "parsing", "format"]}
+
+
+def _run_tip(stage: str) -> str:
+    needs = NEEDS.get(stage)
+    return "Run this stage" + (f"; first {' → '.join(C.STAGES[d][0] for d in needs)}, if they have not run" if needs else "")
+
 
 # Hover tips in plain CSS for buttons that rerun the app: Streamlit's own tooltip stays on screen when a click
 # reruns the page under the mouse.
@@ -59,8 +74,9 @@ BUTTON_TIPS = {
     "run_all": "Run every stage in order for this moment and these inputs, watching each one fill.",
     **{f"live_{k}": "Read the newest page of each channel straight from Telegram (about 20 posts each)."
        for k in (True, False)},
+    **{f"run_{k}": _run_tip(k) for k in C.STAGES if k != "result"},
 }
-RIGHT_TIPS = {"node_forecast", "node_result", "play", "run_all"}  # anchored right so they stay on screen
+RIGHT_TIPS = {"node_forecast", "node_result", "play", "run_all", *(f"run_{k}" for k in C.STAGES)}  # anchored right so they stay on screen
 
 
 def _tips_css() -> str:
@@ -112,8 +128,12 @@ ABOUT = {
     "patterns": """
 - Everything here comes from the alert history known at "now".
 - "Recent" = the 26 weeks before "now", the model's training window.
-- Each chart title says what it means for the model; hover for the numbers.""",
+- Each chart title says what it means for the model; hover for the numbers.
+- A side branch: this analysis shaped the model (rolling window, the usual rhythm as baseline, neighbours as a
+  feature); Forecast does not need this stage to run.""",
     "model": """
+- A side branch: it scores the model on past weeks. Forecast trains or reuses the model for its own week and
+  does not need this stage to run.
 - Gradient boosting; Telegram features for 1–3 h ahead, alert history only after (chosen on the validation weeks).
 - Each week's model is trained on the days before it, never on the week it forecasts; inputs are cut at each
   forecast moment (checked by automated tests).
@@ -268,21 +288,30 @@ def show_log(stage: str) -> bool:
     return True
 
 
+def node(col, stage: str) -> None:
+    with col.container(border=True, key=f"nodebox_{stage}"):
+        st.button(C.STAGES[stage][0], key=f"node_{stage}", on_click=C.select, args=(stage,),
+                  use_container_width=True, type="primary" if stage == C.selected() else "secondary")
+        STRIP[stage] = st.empty()
+        node_status(stage)
+
+
+def arrow(col) -> None:
+    col.markdown("<div class='arrow'>→</div>", unsafe_allow_html=True)
+
+
 def strip():
-    widths = []
-    for i in range(len(ORDER)):
-        widths += [3, 0.35] if i < len(ORDER) - 1 else [3]
-    cols = st.container(key="strip").columns(widths, vertical_alignment="center")
-    sel = C.selected()
-    for i, stage in enumerate(ORDER):
-        title, tip = C.STAGES[stage]
-        with cols[2 * i].container(border=True, key=f"nodebox_{stage}"):
-            st.button(title, key=f"node_{stage}", on_click=C.select, args=(stage,),
-                      use_container_width=True, type="primary" if stage == sel else "secondary")
-            STRIP[stage] = st.empty()
-            node_status(stage)
-        if i < len(ORDER) - 1:
-            cols[2 * i + 1].markdown("<div class='arrow'>→</div>", unsafe_allow_html=True)
+    # One chain (Sources → Parsing → Format), then three parallel branches that each need only Format.
+    cols = st.container(key="strip").columns([3, 0.35, 3, 0.35, 3, 0.35, 9.9, 0.35, 3], vertical_alignment="center")
+    for i, stage in enumerate(ORDER[:3]):
+        node(cols[2 * i], stage)
+        arrow(cols[2 * i + 1])
+    with cols[6].container(border=True, key="branches"):
+        st.markdown("<div class='branch-label'>in parallel · each needs only Format</div>", unsafe_allow_html=True)
+        for col, stage in zip(st.columns(3), ORDER[3:6]):
+            node(col, stage)
+    arrow(cols[7])
+    node(cols[8], ORDER[6])
     return st.empty()
 
 
@@ -299,8 +328,20 @@ def header(stage: str) -> bool:
                     type="primary" if state != "done" else "secondary")
 
 
+def enqueue(stages: list, then: str) -> None:
+    """Run stages one per script run (see app.py), then show `then`."""
+    st.session_state.update(queue=list(stages), queue_total=len(stages), queue_then=then)
+
+
+def missing(stage: str) -> list:
+    return [d for d in NEEDS.get(stage, []) if C.status(d) != "done"]
+
+
 def render(stage: str, run: bool = False, play: bool = False) -> bool:
     clicked = header(stage)
+    if clicked and not run and missing(stage):
+        enqueue(missing(stage) + [stage], then=stage)  # the stages it takes its data from run first
+        st.rerun()
     # Each stage draws in its own slot, and a run in a slot apart from its view: Streamlit reuses what was last drawn
     # in the same place and keeps its old elements on screen until the run ends. Other slots are blanked first.
     slots = [st.empty() for _ in range(2 * len(ORDER))]
@@ -891,7 +932,7 @@ def v_forecast(run: bool, play: bool = False) -> None:
     s, t = C.settings(), C.now()
     week = P.week_of(s.config(), t)
     ready = C.has_models(s, week)
-    compute = run or play or (ready and C.status("forecast") != "done")
+    compute = run or play or (ready and C.status("forecast") != "done" and not missing("forecast"))
     log = RunLog("forecast") if compute and not play else None
     if log is None:
         show_log("forecast")

@@ -88,7 +88,8 @@ tabs and folded sections.
 | Forecast | the next 24 h for every region as a grid; with hindsight, real alerts marked and a plain score; map and one region in tabs; jump to examples | ▷ Play steps the clock an hour at a time |
 | Result | findings with 95 % ranges, what Telegram adds, warnings vs false alarms, regions | |
 
-**Run** runs one stage; **▶ Run all** runs them in order (about 2–3 minutes the first time, most of it
+**Run** runs one stage, after the stages it takes its data from if they have not run (Sources → Parsing →
+Format; Patterns and Model are side branches that Forecast does not need); **▶ Run all** runs them in order (about 2–3 minutes the first time, most of it
 training); **⚙ Inputs** switches the Telegram channels and model settings (the button reads "⚙ Changed"
 when they differ from the committed run), and the stages that depend on them are marked "run again".
 Charts are read-only (hover for values). Trained models are kept, so going back to a week costs nothing. With the
