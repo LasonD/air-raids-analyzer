@@ -19,7 +19,7 @@ class Config:
     retrain_days: int = 7                         # retrain weekly inside the test period
     horizons: tuple[int, ...] = tuple(range(1, 25))
     max_alert_hours: float = 12.0                 # longer alerts are treated as a missed all-clear
-    train_horizons_per_row: int = 6               # horizons sampled per training issue time (memory)
+    train_horizons_per_row: int = 3               # horizons sampled per training issue time (memory)
     exclude_edited: bool = False                  # robustness check: drop edited Telegram posts
     seed: int = 0
     extra: dict = field(default_factory=dict)

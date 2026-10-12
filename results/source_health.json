@@ -1,0 +1,31 @@
+[
+  {
+    "source": "etryvoga",
+    "role": "alerts (target)",
+    "covered_from": "2022-02-25 00:00:00+00:00",
+    "covered_to": "2026-10-12 00:00:00+00:00",
+    "records": 116171
+  },
+  {
+    "source": "kpszsu",
+    "role": "signals",
+    "covered_from": "2026-01-01 01:03:28+00:00",
+    "covered_to": "2026-10-12 12:55:25+00:00",
+    "records": 34220,
+    "kept_posts": 33537,
+    "threat_posts_with_region": "91.6%",
+    "edited_posts": "2.2%",
+    "days_under_50_posts": 16
+  },
+  {
+    "source": "povitryanatrivogaaa",
+    "role": "signals",
+    "covered_from": "2025-12-31 23:30:55+00:00",
+    "covered_to": "2026-10-12 12:55:30+00:00",
+    "records": 53806,
+    "kept_posts": 44104,
+    "threat_posts_with_region": "93.1%",
+    "edited_posts": "14.4%",
+    "days_under_50_posts": 6
+  }
+]

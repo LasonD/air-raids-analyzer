@@ -7,3 +7,8 @@ __pycache__/
 
 # Raw downloads (re-creatable); parsed snapshots are committed separately
 data/raw/
+
+# Local run artefacts
+.playwright-mcp/
+*.log
+results/predictions_no_edited.parquet

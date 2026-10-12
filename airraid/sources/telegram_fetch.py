@@ -20,10 +20,12 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
+from airraid.paths import RAW
+
 PREVIEW_URL = "https://t.me/s/{channel}"
 POST_RE = re.compile(r'data-post="[^/]+/(\d+)".*?<time datetime="([^"]+)"', re.S)
 USER_AGENT = "Mozilla/5.0 (compatible; air-raids-analyzer research)"
-DEFAULT_CACHE = Path("data/raw/telegram")
+DEFAULT_CACHE = RAW / "telegram"
 PAGE_SIZE = 20
 
 

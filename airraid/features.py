@@ -70,6 +70,8 @@ def _signal_features(src: SourceData, hours: pd.DatetimeIndex, times: pd.Datetim
     t = times.as_unit("ns").asi8
     for c, code in enumerate(CODES):
         pub = np.sort(ns(threats.loc[threats["region"] == code, "published_at_utc"]))
+        if len(pub) == 0:
+            continue
         idx = np.searchsorted(pub, t, side="left") - 1
         last = np.where(idx >= 0, pub[np.maximum(idx, 0)], np.iinfo(np.int64).min // 2)
         since[:, c] = np.minimum((t - last) / 3.6e12, 48.0)
@@ -106,11 +108,16 @@ def build(inputs: Inputs, times: pd.DatetimeIndex, cfg: Config) -> FeatureSet:
     return FeatureSet(long, H)
 
 
+def target_hour(t: pd.Series, h: pd.Series) -> pd.Series:
+    """Horizon h = 1..24 is the hour [t + h - 1, t + h): h=1 is the hour right after issuing."""
+    return t + pd.to_timedelta(h - 1, unit="h")
+
+
 def expand(fs: FeatureSet, horizons: tuple[int, ...], sample: int | None = None, seed: int = 0) -> pd.DataFrame:
     """One row per (issue time, region, horizon) with target-hour features and the label y.
 
-    The climatology and same-hour features read hour tau - 24k, where k is the smallest
-    number of days that puts it before t (so it is a complete, observed hour).
+    The climatology and same-hour features read the same hour of day one or more days
+    earlier (tau - 24 h <= t - 1 h for every horizon up to 24), i.e. a complete, observed hour.
     """
     reg = fs.region
     n = len(reg)
@@ -124,7 +131,9 @@ def expand(fs: FeatureSet, horizons: tuple[int, ...], sample: int | None = None,
         h = np.tile(np.array(horizons), n)
     out = reg.iloc[rows].reset_index(drop=True)
     out["h"] = h.astype(np.int16)
-    tau = out["t"] + pd.to_timedelta(out["h"], unit="h")
+    if max(horizons) > 24:
+        raise ValueError("same-hour features assume horizons of at most 24 h")
+    tau = target_hour(out["t"], out["h"])
     local = tau.dt.tz_convert("Europe/Kyiv")
     out["target_hour"] = local.dt.hour.astype(np.int16)
     out["target_dow"] = local.dt.dayofweek.astype(np.int16)
@@ -132,8 +141,7 @@ def expand(fs: FeatureSet, horizons: tuple[int, ...], sample: int | None = None,
     H = fs.hourly
     clim = sum(H.shift(24 * j) for j in range(28)) / 28
     pos = H.index.get_indexer(tau)
-    k = np.where(out["h"].to_numpy() <= 23, 1, 2)
-    back = H.index.get_indexer(tau - pd.to_timedelta(24 * k, unit="h"))
+    back = H.index.get_indexer(tau - pd.Timedelta(hours=24))
     col = out["region"].to_numpy()
     Hv, Cv = H.to_numpy(), clim.to_numpy()
     out["same_hour_prev"] = Hv[back, col]

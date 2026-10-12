@@ -1,0 +1,8 @@
+{
+  "data_end": "2026-10-12 00:00:00+00:00",
+  "val_start": "2026-08-17 00:00:00+00:00",
+  "test_start": "2026-09-14 00:00:00+00:00",
+  "train_days": 182,
+  "retrain_days": 7,
+  "exclude_edited": false
+}

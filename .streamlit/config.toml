@@ -1,0 +1,7 @@
+[browser]
+gatherUsageStats = false
+
+[server]
+# Only this machine can open the app.
+address = "localhost"
+port = 8501

@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 
 from airraid.config import Config
-from airraid.features import Inputs, build, expand, feature_columns
+from airraid.features import Inputs, build, expand, feature_columns, target_hour
 from airraid.regions import CODES
 from airraid.schema import SourceData
 
@@ -64,7 +64,9 @@ def test_features_do_not_look_ahead(cut_hours):
     cols = feature_columns(full)
     pd.testing.assert_frame_equal(full[cols], known[cols], check_exact=False, rtol=1e-6)
     # Labels after the cut-off are unknown in the truncated data, as they should be.
-    assert known.loc[known["t"] + pd.to_timedelta(known["h"], unit="h") >= cut, "y"].isna().all()
+    assert known.loc[target_hour(known["t"], known["h"]) >= cut, "y"].isna().all()
+    # and h=1 is the hour right after issuing
+    assert (target_hour(full["t"], full["h"]) - full["t"]).min() == pd.Timedelta(0)
 
 
 def test_detects_a_planted_leak():

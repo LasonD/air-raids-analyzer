@@ -1,0 +1,25 @@
+region,official_alert_hours,volunteer_alert_hours,agreement
+Zakarpattia,0.007,0.006,0.998
+Lviv,0.008,0.211,0.797
+Ivano-Frankivsk,0.009,0.009,0.996
+Ternopil,0.014,0.053,0.956
+Volyn,0.018,0.31,0.701
+Chernivtsi,0.019,0.017,0.994
+Khmelnytskyi,0.031,0.06,0.957
+Rivne,0.045,0.039,0.984
+Vinnytsia,0.087,0.07,0.961
+Zhytomyr,0.139,0.145,0.924
+Kyiv City,0.165,0.164,0.899
+Cherkasy,0.236,0.189,0.885
+Kyiv Oblast,0.361,0.271,0.892
+Kirovohrad,0.397,0.309,0.895
+Kherson,0.467,0.376,0.805
+Odesa,0.489,0.414,0.88
+Mykolaiv,0.535,0.482,0.852
+Poltava,0.575,0.42,0.792
+Chernihiv,0.869,0.514,0.638
+Sumy,0.976,0.523,0.547
+Zaporizhzhia,0.983,0.338,0.355
+Kharkiv,0.994,0.676,0.681
+Donetsk,0.998,0.279,0.281
+Dnipropetrovsk,1.0,0.67,0.67
