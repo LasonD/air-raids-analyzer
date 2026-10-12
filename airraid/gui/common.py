@@ -33,8 +33,10 @@ BLUE, AQUA, GREY, ALERT_RED, AMBER = "#2a78d6", "#1baf7a", "#8a8985", "#d03b3b",
 KIND_COLORS = {"drone": BLUE, "missile": "#7a52c7", "aviation": AMBER, "explosion": "#d4498f", "clear": AQUA}
 THEMES = {  # probability ramp runs from the page surface towards high contrast in both themes
     "light": dict(ramp=["#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", "#0d366b"],
+                  prob=["#fbe3df", "#f5b0a6", "#ec7a6b", "#d64434", "#9e1f14"], ink="#1f1f1f",
                   surface="#ffffff", excluded="#e3e2de"),
     "dark": dict(ramp=["#1b2a40", "#1c3f6e", "#1c5cab", "#2a78d6", "#5598e7", "#9ec5f4", "#cde2fb"],
+                 prob=["#33201f", "#6b2723", "#a8322a", "#e0533f", "#ffab9c"], ink="#ffffff",
                  surface="#0e1117", excluded="#2a2b31"),
 }
 
@@ -224,6 +226,18 @@ def theme() -> dict:
     return THEMES["dark" if t is not None and t.type == "dark" else "light"]
 
 
+BANDS = [0, 0.1, 0.25, 0.5, 0.75, 1.0]
+
+
+def bands() -> list:
+    """Probability in five stepped bands: easier to read than a continuous ramp."""
+    r = theme()["prob"]  # reds read as risk; real alerts are then marked in ink, not red
+    return [x for i, c in enumerate(r) for x in ([BANDS[i], c], [BANDS[i + 1], c])]
+
+
+BAND_BAR = dict(tickvals=BANDS, ticktext=[f"{b:.0%}" for b in BANDS], thickness=10)
+
+
 def ramp() -> list:
     r = theme()["ramp"]
     return [[i / (len(r) - 1), c] for i, c in enumerate(r)]
@@ -235,7 +249,8 @@ _KEYS = {"n": 0}
 def show(fig, height=None):
     """Plotly chart without toolbar; a fresh key each call so live updates can redraw the same slot."""
     _KEYS["n"] += 1
-    fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", dragmode=False)
+    fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", dragmode=False,
+                      legend=dict(itemclick=False, itemdoubleclick=False))
     fig.update_xaxes(fixedrange=True)
     fig.update_yaxes(fixedrange=True)
     if height:
@@ -292,13 +307,13 @@ def ukraine_map(codes, probs, actual, value_label, height=440):
     outcome = [""] * len(codes) if actual is None else [" · alert happened" if a else " · no alert" for a in actual]
     fig.add_trace(go.Choropleth(
         geojson=geo(), featureidkey="properties.shapeISO", locations=codes, z=probs, zmin=0, zmax=1,
-        colorscale=ramp(), marker_line_color=th["surface"], marker_line_width=1,
+        colorscale=bands(), marker_line_color=th["surface"], marker_line_width=1,
         customdata=np.array([names, outcome]).T,
-        colorbar=dict(title=value_label, tickformat=".0%", orientation="h", x=0.5, y=-0.02, len=0.5, thickness=10),
+        colorbar=dict(title=value_label, orientation="h", x=0.5, y=-0.02, len=0.5, **BAND_BAR),
         hovertemplate="%{customdata[0]}: %{z:.0%}%{customdata[1]}<extra></extra>"))
     if actual is not None and np.nansum(actual) > 0:
         hit = [c for c, a in zip(codes, actual) if a == 1]
-        for color, width in ((th["surface"], 6), (ALERT_RED, 2.5)):  # surface halo keeps shared borders readable
+        for color, width in ((th["surface"], 6), (th["ink"], 2.5)):  # surface halo keeps shared borders readable
             fig.add_trace(go.Choropleth(
                 geojson=geo(), featureidkey="properties.shapeISO", locations=hit, z=[1] * len(hit),
                 colorscale=[[0, "rgba(0,0,0,0)"], [1, "rgba(0,0,0,0)"]], showscale=False,

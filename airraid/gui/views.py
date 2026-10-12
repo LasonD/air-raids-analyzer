@@ -93,6 +93,8 @@ ABOUT = {
 - **📡 Newest posts** reads both channels right now. They cannot enter a forecast until the alert history for
   the same hours is published.""",
     "parsing": """
+- Only the two Telegram channels are text. The alert history is already a table and goes straight to Format;
+  the official alert file (@air_alert_ua, stops 7 Sep) is only used to check how often the records agree.
 - Ordered keyword and emoji rules per channel decide the kind; the first match wins.
 - Place names are matched with Ukrainian case endings (Київщина, Київщини, Київщині…) plus frequent towns.
 - A post with no threat word that names a place within an hour of a threat post continues it ("На Боярку").
@@ -496,6 +498,7 @@ def v_parsing(run: bool) -> None:
         parse_live()
     elif not show_log("parsing"):
         hint("Run parses every downloaded post, in batches. Try the rules on one post below meanwhile.")
+    st.caption("Text sources only: the two Telegram channels. The alert history is already a table (see Format).")
     parsed = {ch: C.classified(ch) for ch in P.SIGNALS if C.classified(ch) is not None}
     t = C.now()
     if parsed and C.status("parsing") != "not run":
@@ -816,38 +819,72 @@ def compute_forecast(log: RunLog | None = None, say=None) -> None:
         C.record("forecast", time.time() - t0, out=out, note=note)
 
 
-def draw_forecast(map_slot, side_slot, h: int, rhythm: bool, hindsight: bool, region: int) -> None:
+def _actual(H: pd.DataFrame, starts, code: str) -> np.ndarray:
+    return np.array([H.at[x, code] if x < C.LAST else np.nan for x in starts], dtype=float)
+
+
+def draw_forecast(head, grid_slot, map_slot, one_slot, h: int, rhythm: bool, hindsight: bool, region: int) -> None:
     out, t, s = C.runs()["forecast"]["out"], C.now(), C.settings()
     fc, so_far = out["fc"], out["so_far"]
-    rows = fc[fc["h"] == h].sort_values("region")
-    codes = [CODES[i] for i in rows["region"]]
-    probs = rows["p_climatology" if rhythm else "p_main"].to_numpy()
-    target = t + pd.Timedelta(hours=h - 1)
     H = S.hourly(C.LAST, s.max_alert_hours)  # full history, used only for hindsight
-    actual = H.loc[target, codes].to_numpy() if hindsight and target < C.LAST else None
-    with map_slot.container():
-        st.markdown(f"**{C.kyiv(t)}** → {C.hour_span(target)} · expected **{probs.sum():.1f}** regions under alert"
-                    + (f" · actual **{int(np.nansum(actual))}**" if actual is not None else ""))
-        C.show(C.ukraine_map(codes, probs, actual, "usual daily rhythm" if rhythm else "chance of an alert", 420))
-    with side_slot.container():
-        st.markdown(f"**This week's forecasts so far** (model of {C.kyiv(out['week'], '%d %b')})",
-                    help="Forecasts made since the last retraining whose 24 hours have all passed by 'now'.")
+    starts = pd.DatetimeIndex([t + pd.Timedelta(hours=k - 1) for k in range(1, 25)])
+    p_main = fc.pivot(index="region", columns="h", values="p_main")
+    p_clim = fc.pivot(index="region", columns="h", values="p_climatology")
+    order = p_main.mean(axis=1).sort_values(ascending=False).index
+    act = np.array([_actual(H, starts, CODES[r]) for r in order]) if hindsight else None
+    with head.container():
+        p1 = p_main[1].sort_values(ascending=False)
+        st.markdown(f"**{C.kyiv(t)}** · next hour: expected **{p1.sum():.1f}** regions under alert · most likely "
+                    + ", ".join(f"{BY_CODE[CODES[r]].name} {v:.0%}" for r, v in p1.head(3).items()))
+        if act is not None:
+            known = ~np.isnan(act)
+            if known.any():
+                y, pf, pr = act[known], p_main.loc[order].to_numpy()[known], p_clim.loc[order].to_numpy()[known]
+                sk = C.skill(y, pf, pr)
+                st.markdown(f"**What happened:** {int(y.sum())} of {known.sum()} region-hours had an alert. The forecast "
+                            f"gave them **{pf[y == 1].mean():.0%}** on average (usual rhythm {pr[y == 1].mean():.0%}); "
+                            f"the quiet ones got {pf[y == 0].mean():.0%} (rhythm {pr[y == 0].mean():.0%}). Overall "
+                            f"**{abs(sk):.0%} {'closer to' if sk >= 0 else 'further from'}** what happened than "
+                            "the rhythm.",
+                            help="Closer = lower squared error between the chance and what happened (Brier skill score).")
+            else:
+                st.caption("What happened is not known yet for these hours: the data ends here.")
         if len(so_far):
             g1 = so_far[so_far["h"] == 1]
-            q1 = g1[g1["active_now"] == 0]
-            m = st.columns(3)
-            m[0].metric("checked", f"{so_far['t'].nunique()}", help="forecast moments with all 24 hours behind them")
-            m[1].metric("next hour", C.pct(C.skill(g1["y"], g1["p_main"], g1["p_climatology"]), 0),
-                        help="% better than the usual daily rhythm")
-            m[2].metric("no alert running", C.pct(C.skill(q1["y"], q1["p_main"], q1["p_climatology"]), 0))
-        else:
-            st.caption("None yet: the week has just started.")
+            st.caption(f"This week's model (since {C.kyiv(out['week'], '%d %b')}): {so_far['t'].nunique()} earlier "
+                       f"forecasts checked, next hour {C.pct(C.skill(g1['y'], g1['p_main'], g1['p_climatology']), 0)} "
+                       "better than the usual rhythm.")
+    with grid_slot.container():
+        names = [BY_CODE[CODES[r]].name for r in order]
+        x = C.local(starts)
+        fig = go.Figure(go.Heatmap(z=p_main.loc[order].to_numpy(), x=x, y=names, zmin=0, zmax=1, xgap=1, ygap=1,
+                                   colorscale=C.bands(), colorbar=dict(title="chance", **C.BAND_BAR),
+                                   hovertemplate="%{y}, %{x|%a %H:00}: %{z:.0%}<extra></extra>"))
+        if act is not None:
+            ii, jj = np.nonzero(act == 1)
+            fig.add_trace(go.Scatter(x=x[jj], y=[names[i] for i in ii], mode="markers", name="alert happened",
+                                     marker=dict(color=C.theme()["ink"], size=7, line=dict(color=C.theme()["surface"], width=1)),
+                                     hovertemplate="%{y}, %{x|%a %H:00}: alert happened<extra></extra>"))
+        fig.update_layout(height=560, yaxis=dict(autorange="reversed", tickfont=dict(size=11)),
+                          xaxis=dict(tickformat="%H:00", dtick=3 * 3_600_000), legend=dict(orientation="h", y=-0.08),
+                          margin=dict(l=10, r=10, t=10, b=30))
+        C.show(fig)
+    with map_slot.container():
+        rows = fc[fc["h"] == h].sort_values("region")
+        codes = [CODES[i] for i in rows["region"]]
+        probs = rows["p_climatology" if rhythm else "p_main"].to_numpy()
+        target = t + pd.Timedelta(hours=h - 1)
+        actual = H.loc[target, codes].to_numpy() if hindsight and target < C.LAST else None
+        st.markdown(f"{C.hour_span(target)} · expected **{probs.sum():.1f}** regions under alert"
+                    + (f" · actual **{int(np.nansum(actual))}**" if actual is not None else ""))
+        C.show(C.ukraine_map(codes, probs, actual, "usual daily rhythm" if rhythm else "chance of an alert", 420))
+        st.caption("Grey: not forecast (Luhansk, Crimea, Sevastopol: no usable alert data). Outlined: an alert "
+                   "happened (with 'What happened' on).")
+    with one_slot.container():
         one = fc[fc["region"] == region].sort_values("h")
-        starts = one["t"] + pd.to_timedelta(one["h"] - 1, unit="h")
-        act = np.array([H.at[x, CODES[region]] if x < C.LAST else np.nan for x in starts]) if hindsight else None
         st.markdown(f"**{BY_CODE[CODES[region]].name}, next 24 hours**")
-        C.show(C.hourly_chart(starts, one["p_main"].to_numpy(), one["p_climatology"].to_numpy(), act, mark=target,
-                              height=220))
+        C.show(C.hourly_chart(starts, one["p_main"].to_numpy(), one["p_climatology"].to_numpy(),
+                              _actual(H, starts, CODES[region]) if hindsight else None, height=260))
 
 
 def v_forecast(run: bool, play: bool = False) -> None:
@@ -858,25 +895,32 @@ def v_forecast(run: bool, play: bool = False) -> None:
     log = RunLog("forecast") if compute and not play else None
     if log is None:
         show_log("forecast")
-    names = [BY_CODE[c].name for c in CODES]
-    c = st.columns([2.2, 1.6, 1.2, 1.4, 1.6], vertical_alignment="bottom")
-    h = c[0].slider("Hours ahead", 1, 24, 1, help="1 = the hour right after the forecast is made.")
-    rhythm = c[1].segmented_control("Colour by", ["Forecast", "Usual rhythm"], default="Forecast",
-                                    required=True) == "Usual rhythm"
-    hindsight = c[2].toggle("What happened", help="Hindsight: outcomes after 'now', never seen by the model.")
-    region = names.index(c[3].selectbox("Region", names, index=CODES.index("UA-30"), key="fc_region"))
-    c[4].selectbox("Jump to", list(PRESET_RULES), index=None, key="jump", on_change=_jump, placeholder="an example…",
+    c = st.columns([1.4, 1.8, 4], vertical_alignment="bottom")
+    hindsight = c[0].toggle("What happened", help="Hindsight: outcomes after 'now', never seen by the model.")
+    c[1].selectbox("Jump to", list(PRESET_RULES), index=None, key="jump", on_change=_jump, placeholder="an example…",
                    help="; ".join(f"{k}: {v}" for k, v in PRESET_RULES.items()) + " (test weeks).")
     say = st.empty()
-    left, right = st.columns([3, 2])
-    map_slot, side_slot = left.empty(), right.empty()
     if compute:
         compute_forecast(log, say.caption)
         say.empty()
     if C.status("forecast") == "not run":
         hint(f"Run trains the model for the week of {C.kyiv(week, '%d %b')} and forecasts the next 24 hours.")
         return
-    draw_forecast(map_slot, side_slot, h, rhythm, hindsight, region)
+    head = st.empty()
+    names = [BY_CODE[c].name for c in CODES]
+    tabs = st.tabs(["Region × hour", "Map", "One region"])
+    with tabs[0]:
+        grid_slot = st.empty()
+    with tabs[1]:
+        a, b = st.columns([3, 2], vertical_alignment="bottom")
+        h = a.slider("Hours ahead", 1, 24, 1, help="1 = the hour right after the forecast is made.")
+        rhythm = b.segmented_control("Colour by", ["Forecast", "Usual rhythm"], default="Forecast",
+                                     required=True) == "Usual rhythm"
+        map_slot = st.empty()
+    with tabs[2]:
+        region = names.index(st.selectbox("Region", names, index=CODES.index("UA-30"), key="fc_region"))
+        one_slot = st.empty()
+    draw_forecast(head, grid_slot, map_slot, one_slot, h, rhythm, hindsight, region)
     if play:
         for _ in range(24):
             if C.now() >= C.LAST:
@@ -885,7 +929,7 @@ def v_forecast(run: bool, play: bool = False) -> None:
             running("forecast", C.kyiv(C.now(), "%d %b %H:%M"))
             compute_forecast(say=say.caption)
             say.empty()
-            draw_forecast(map_slot, side_slot, h, rhythm, hindsight, region)
+            draw_forecast(head, grid_slot, map_slot, one_slot, h, rhythm, hindsight, region)
             time.sleep(0.3)
 
 

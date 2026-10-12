@@ -18,9 +18,9 @@ blue and its view fills live; a stage whose inputs changed turns orange.*
 
 ![Forecast at a replay moment](docs/screenshots/02_forecast.png)
 
-*Forecast at 30 Sep 00:00 (an example "missed forecast" from the test weeks), with the outcome in
-hindsight (red outlines) and the week's forecasts checked so far. The clock moved, so Model asks to
-run again; the forecast reused that week's model.*
+*Forecast at 30 Sep 00:00 (an example "missed forecast" from the test weeks): all 24 regions × 24 hours
+at once, darker red = more likely, dots = an alert really happened (hindsight), and a plain-language
+score against the usual daily rhythm. The map and a single region are in the other tabs.*
 
 ## Results (test period, 14 Sep – 12 Oct 2026, 380k forecasts)
 
@@ -85,7 +85,7 @@ tabs and folded sections.
 | Format | all sources for one region on one time axis; the hourly table the model gets | each source checked against the common format |
 | Patterns | one finding per tab: trend since 2022, persistence, hour of day by region, co-occurrence, durations | |
 | Model | weekly walk-forward on the weeks before "now", scored; match with the committed run | each week's bar turns amber (training), then blue with its score |
-| Forecast | map, 24 hours for a region, this week's forecasts checked so far; jump to examples | ▷ Play steps the clock an hour at a time |
+| Forecast | the next 24 h for every region as a grid; with hindsight, real alerts marked and a plain score; map and one region in tabs; jump to examples | ▷ Play steps the clock an hour at a time |
 | Result | findings with 95 % ranges, what Telegram adds, warnings vs false alarms, regions | |
 
 **Run** runs one stage; **▶ Run all** runs them in order (about 2–3 minutes the first time, most of it
@@ -101,6 +101,11 @@ now, and the alert dataset is published once a day (about 05:00 UTC), ending at 
 official alert channel's public page stopped on 7 Sep 2026. eTryvoga's own channel
 (@UkraineAlarmSignal) posts alerts live, per district; turning it into the same oblast-level alerts and
 checking it against the dataset on past days would close the gap. That is the next step, not done.
+
+**Other next steps, not done.** More text sources through the same adapter interface, compared in the
+same walk-forward: the Air Force's morning summaries (drones and missiles launched overnight, a daily
+intensity signal for the 4–24 h range where the model only matches the usual rhythm), news and official
+statements, and the route maps posted as images. A per-oblast filter for the Patterns stage.
 
 | | |
 |---|---|
