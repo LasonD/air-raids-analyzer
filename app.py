@@ -12,6 +12,9 @@ from airraid.gui import views as V
 
 st.set_page_config(page_title="Air raid alert forecast", layout="wide", initial_sidebar_state="collapsed")
 st.html(V.CSS)
+if not st.session_state.get("entered"):  # start screen once per session
+    V.landing()
+    st.stop()
 
 top = V.top_bar()
 # "Run all" is a queue worked off one stage per script run, so each stage starts on a clean screen.

@@ -73,7 +73,8 @@ What this says:
 
 ## The app
 
-One screen: the clock and inputs on top, the pipeline below it, then the selected stage. Explanations
+A start screen says what the app does in two lines; then one screen: the clock and inputs on top, the
+pipeline below it, then the selected stage. Explanations
 live in tooltips and each stage's ⓘ. A run shows its steps live in a log that folds into one line when it
 ends (open it to see each step's count and time); each stage shows its main result first, with details in
 tabs and folded sections.

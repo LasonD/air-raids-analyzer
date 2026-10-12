@@ -1,6 +1,7 @@
 """The app: a top bar, the pipeline strip and one view per stage. A run draws its view as it computes."""
 from __future__ import annotations
 
+import base64
 import time
 
 import numpy as np
@@ -359,6 +360,54 @@ def render(stage: str, run: bool = False, play: bool = False) -> bool:
 
 def hint(text: str) -> None:
     st.caption(f"▶ {text}")
+
+
+# ---------------------------------------------------------------- start screen
+
+# Inline <svg> is stripped by st.html, so the icon goes in as an image.
+_ICON = base64.b64encode("""<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+    <circle cx="32" cy="40" r="5" fill="#d03b3b"/>
+    <path d="M20 40a12 12 0 0 1 24 0" fill="none" stroke="#d03b3b" stroke-width="3.5" stroke-linecap="round"/>
+    <path d="M12 40a20 20 0 0 1 40 0" fill="none" stroke="#d03b3b" stroke-width="3.5" stroke-linecap="round" opacity=".6"/>
+    <path d="M4 40a28 28 0 0 1 56 0" fill="none" stroke="#d03b3b" stroke-width="3.5" stroke-linecap="round" opacity=".3"/>
+  </svg>""".encode()).decode()
+
+LANDING = f"""
+<div class="landing">
+  <img src="data:image/svg+xml;base64,{_ICON}" width="64" height="64" alt="">
+  <h1>Air raid alerts in Ukraine</h1>
+  <p class="sub">A 24-hour forecast pipeline</p>
+  <p>The chance of an air raid alert in each of Ukraine's 24 regions, hour by hour for the next day, learned
+  from the alert history and two public Telegram channels. Replay any moment of the last weeks and run every
+  step from raw data to the result.</p>
+  <div class="facts">
+    <div><b>24 × 24</b><span>regions × hours ahead</span></div>
+    <div><b>3 sources</b><span>alert history, Air Force, alert map</span></div>
+    <div><b>No leakage</b><span>only what was published before "now"</span></div>
+  </div>
+</div>
+<style>
+.landing {{text-align: center; max-width: 40rem; margin: 6vh auto 1.5rem;}}
+.landing h1 {{font-size: 2.2rem; margin: 0.6rem 0 0; padding: 0;}}
+.landing .sub {{color: #8a8985; margin: 0.2rem 0 1.2rem; font-size: 1.05rem;}}
+.landing p {{line-height: 1.55;}}
+.landing .facts {{display: flex; gap: 0.75rem; justify-content: center; margin-top: 1.4rem; flex-wrap: wrap;}}
+.landing .facts div {{flex: 1 1 10rem; border: 1px solid rgba(128, 128, 128, 0.3); border-radius: 0.5rem;
+  padding: 0.6rem 0.5rem; display: flex; flex-direction: column; gap: 0.15rem;}}
+.landing .facts span {{color: #8a8985; font-size: 0.85rem;}}
+</style>"""
+
+
+def _enter():
+    st.session_state["entered"] = True
+
+
+def landing() -> None:
+    st.html(LANDING)
+    _, mid, _ = st.columns([1, 1, 1])
+    mid.button("Open the pipeline →", type="primary", use_container_width=True, on_click=_enter, key="enter")
+    st.html("<p style='text-align:center;color:#8a8985;font-size:0.85rem;margin-top:1rem'>Research prototype, "
+            "not a warning service. Always follow official air raid alerts.</p>")
 
 
 # ---------------------------------------------------------------- 1 sources
