@@ -1,7 +1,5 @@
-"""What each stage's Run button does. Rendering lives in the page modules."""
+"""Cached computations behind the stage views (no rendering here)."""
 from __future__ import annotations
-
-import time
 
 import pandas as pd
 import streamlit as st
@@ -11,31 +9,9 @@ from airraid.gui import common as C
 from airraid.sources import registry
 
 
-def run_sources(log=print) -> None:
-    t0 = time.time()
-    C.inputs()
-    C.record("sources", time.time() - t0)
-    log(f"sources loaded ({time.time() - t0:.1f} s)")
-
-
-def run_parsing(log=print) -> None:
-    t0 = time.time()
-    for ch in P.SIGNALS:
-        C.classified(ch)
-    C.record("parsing", time.time() - t0)
-    log(f"posts parsed ({time.time() - t0:.1f} s)")
-
-
 @st.cache_data(show_spinner=False, max_entries=8)
 def hourly(t: pd.Timestamp, max_alert_hours: float) -> pd.DataFrame:
     return P.hourly_history(C.inputs().alerts, t, max_alert_hours)
-
-
-def run_format(log=print) -> None:
-    t0 = time.time()
-    hourly(C.now(), C.settings().max_alert_hours)
-    C.record("format", time.time() - t0)
-    log(f"common format and hourly table ({time.time() - t0:.1f} s)")
 
 
 @st.cache_data(show_spinner=False, max_entries=8)
@@ -59,49 +35,16 @@ def patterns(t: pd.Timestamp, max_alert_hours: float) -> dict:
     }
 
 
-def run_patterns(log=print) -> None:
-    t0 = time.time()
-    patterns(C.now(), C.settings().max_alert_hours)
-    C.record("patterns", time.time() - t0)
-    log(f"patterns ({time.time() - t0:.1f} s)")
-
-
-def run_model(log=print, progress=None) -> None:
-    t0 = time.time()
-    s, t = C.settings(), C.now()
-    fs = C.features_now(s)
-    blocks = P.scoring_weeks(s.config(), t, st.session_state.get("n_weeks", 4))
-    out = []
-    for i, (w, end) in enumerate(blocks):
-        short, long = C.models(fs, s, w, log)
-        out.append(P.predict(fs, s, short, long, w, end).dropna(subset=["y"]))
-        if progress:
-            progress((i + 1) / len(blocks), f"week of {C.kyiv(w, '%d %b')} scored")
-    pred = pd.concat(out, ignore_index=True) if out else pd.DataFrame()
-    C.record("model", time.time() - t0, out=pred)
-    log(f"model & test: {len(blocks)} weeks ({time.time() - t0:.0f} s)")
-
-
-def run_forecast(log=print) -> None:
-    t0 = time.time()
-    s, t = C.settings(), C.now()
-    fs = C.features_now(s)
-    week = P.week_of(s.config(), t)
-    short, long = C.models(fs, s, week, log)
-    fc = P.predict(fs, s, short, long, t, t + P.HOUR)
-    so_far = P.predict(fs, s, short, long, week, t - pd.Timedelta(hours=23)).dropna(subset=["y"]) \
-        if t - pd.Timedelta(hours=23) > week else pd.DataFrame()
-    C.record("forecast", time.time() - t0, out={"fc": fc, "so_far": so_far, "week": week})
-    log(f"forecast made at {C.kyiv(t)} ({time.time() - t0:.0f} s)")
-
-
-def run_all(log=print) -> None:
-    run_sources(log)
-    run_parsing(log)
-    run_format(log)
-    run_patterns(log)
-    run_model(log)
-    run_forecast(log)
+@st.cache_data(show_spinner=False)
+def daily_counts() -> pd.DataFrame:
+    inp = C.inputs()
+    a = inp.alerts.frame
+    out = {"etryvoga": a.groupby(a["start_utc"].dt.floor("D")).size()}
+    for s in inp.signals:
+        f = s.frame.drop_duplicates(["ref", "published_at_utc"])
+        out[s.name] = f.groupby(f["published_at_utc"].dt.floor("D")).size()
+    df = pd.DataFrame(out).fillna(0)
+    return df[df.index >= pd.Timestamp("2026-01-01", tz="UTC")]
 
 
 def fetch_live() -> None:

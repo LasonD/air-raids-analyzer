@@ -6,19 +6,19 @@ optionally, from two public Telegram channels: the Air Force of Ukraine (@kpszsu
 alert-map channel (@povitryanatrivogaaa). It is evaluated hour by hour on the last four weeks of data
 (14 Sep – 12 Oct 2026), each week forecast by a model trained only on earlier data.
 
-The GUI is an app that runs the whole pipeline stage by stage, from the raw sources to the forecast
-and its scores, with a **replay clock**: set "now" to any hour of the last eight weeks and every stage
-sees only what was published before it.
+The GUI is the pipeline itself: the stages as clickable nodes, a **replay clock** ("now" can be any
+hour of the last eight weeks, and every stage sees only what was published before it), and each stage
+drawing its data as it runs.
 
-![Overview: the pipeline](docs/screenshots/01_overview.png)
+![The pipeline while it runs](docs/screenshots/01_pipeline_running.png)
 
-*Overview: seven stages, each with a Run button and its status. The left panel holds the replay clock
-and the inputs (Telegram channels on/off, model settings).*
+*Run all, at the Model stage: earlier stages are done (✓ with their time), the week of 7 Sep is scored
+(next hour +28 % against the usual daily rhythm), the week of 14 Sep is training.*
 
-![Forecast at a replay moment](docs/screenshots/02_forecast.png)
+![Forecast after playing a day](docs/screenshots/02_forecast.png)
 
-*Stage 6 at 30 Sep 00:00: the model for that week is retrained on the spot (data up to 27 Sep), the map
-shows the chance of an alert per region, and "Show what happened" adds the outcome in hindsight.*
+*Forecast at 1 Oct 00:00 after ▷ Play stepped through the previous day: the chance of an alert per
+region, the outcome in hindsight (red outlines), and the week's forecasts checked so far.*
 
 ## Results (test period, 14 Sep – 12 Oct 2026, 380k forecasts)
 
@@ -71,32 +71,35 @@ What this says:
 
 ## The app
 
-| Stage | What you can do |
-|---|---|
-| 1 Sources | See what each source holds and what has arrived by the replay moment; raw CSV rows and raw posts; **fetch the newest Telegram posts live** |
-| 2 Parsing | Type or pick a post and see its threat kind, the rule that decided it, and the regions; all posts parsed; live posts parsed |
-| 3 Common format | The internal format and its checks; one region with all sources on one time axis; the hourly table the model gets |
-| 4 Patterns | Alerts since 2022, hour of day by region, how long alerts last, regions going under alert together, how fast an alert's information fades |
-| 5 Model & test | Weekly walk-forward training on the weeks before "now", scored; shows how closely it reproduces the committed run |
-| 6 Forecast | The forecast at "now": map, 24 hours per region, this week's forecasts scored so far; jump to example moments |
-| 7 Result | Findings with 95 % ranges, what Telegram adds, warnings vs false alarms, calibration, regions, limits |
+One screen: the clock and inputs on top, the pipeline below it, then the selected stage. Explanations
+live in tooltips and each stage's ⓘ.
 
-Data stages take seconds and then follow the clock; model stages train gradient boosting (about
-10–15 s per model and week) and wait for a click, and trained models are kept for the session. Changing
-an input marks the stages that depend on it as out of date. With the committed settings, the app's
-recomputed forecasts match `results/predictions.parquet` to 3·10⁻⁸ (`tests/test_replay.py`).
+| Stage | Shows | While running |
+|---|---|---|
+| Sources | what each source holds by "now"; raw rows; **📡 the newest posts, live** | each source's card fills as it loads |
+| Parsing | try any post: kind, rule, regions; kinds per channel; parsed posts | kinds chart grows batch by batch |
+| Format | all sources for one region on one time axis; the hourly table the model gets | |
+| Patterns | trend since 2022, hour of day by region, persistence, co-occurrence, durations | |
+| Model | weekly walk-forward on the weeks before "now", scored; match with the committed run | each week's bar turns amber (training), then blue with its score |
+| Forecast | map, 24 hours for a region, this week's forecasts checked so far; jump to examples | ▷ Play steps the clock an hour at a time |
+| Result | findings with 95 % ranges, what Telegram adds, warnings vs false alarms, regions | |
 
-**Live data, and why it does not reach the forecast.** Stage 1 can read the newest Telegram posts
-straight from t.me, and stage 2 parses them. A forecast for "now" also needs to know which regions are
-under alert now, and the alert dataset is published once a day (about 05:00 UTC), ending at midnight
-UTC; the official alert channel's public page stopped on 7 Sep 2026. eTryvoga's own channel
-(@UkraineAlarmSignal) posts alerts live, per district; turning it into the same oblast-level alerts
-and checking it against the dataset on past days would close the gap. That is the next step, not done.
+**Run** runs one stage; **▶ Run all** runs them in order (about 2–3 minutes the first time, most of it
+training); **⚙ Inputs** switches the Telegram channels and model settings, and the stages that depend on
+them are marked "run again". Trained models are kept, so going back to a week costs nothing. With the
+committed settings the app's forecasts match `results/predictions.parquet` to 3·10⁻⁸
+(`tests/test_replay.py`).
+
+**Live data, and why it does not reach the forecast.** 📡 reads the newest Telegram posts straight from
+t.me, and Parsing parses them. A forecast for "now" also needs to know which regions are under alert
+now, and the alert dataset is published once a day (about 05:00 UTC), ending at midnight UTC; the
+official alert channel's public page stopped on 7 Sep 2026. eTryvoga's own channel
+(@UkraineAlarmSignal) posts alerts live, per district; turning it into the same oblast-level alerts and
+checking it against the dataset on past days would close the gap. That is the next step, not done.
 
 | | |
 |---|---|
-| ![Parsing, live posts](docs/screenshots/03_parsing.png) | ![Model & test](docs/screenshots/04_model.png) |
-| ![Patterns](docs/screenshots/05_patterns.png) | ![Result](docs/screenshots/06_result.png) |
+| ![Parsing, live posts](docs/screenshots/03_parsing.png) | ![Result](docs/screenshots/04_result.png) |
 
 ## What went wrong along the way (and what changed)
 
@@ -126,9 +129,11 @@ and checking it against the dataset on past days would close the gap. That is th
   The honesty review also caught two wrong sentences in this README ("never seen in training"; Telegram
   "adds noise" beyond 3 h, which holds on validation only).
 * **Then it was still a report.** Everything was precomputed. The app was rebuilt around the pipeline:
-  one page per stage with Run buttons, a replay clock that cuts every input at "now" (the same cut-off
-  the leakage test checks), live Telegram fetching, and models retrained in the app. Checking that the
-  replay reproduces the committed run came first.
+  a replay clock that cuts every input at "now" (the same cut-off the leakage test checks), Run buttons,
+  live Telegram fetching, and models retrained in the app. Checking that the replay reproduces the
+  committed run came first. A first version put each stage on its own text-heavy page; the final one is a
+  single screen with the stages as nodes, tooltips instead of paragraphs, and views that fill while they
+  run.
 * **Captions written before looking at the data were wrong.** "Night hours dominate" (carried over from
   the first UI): over the last 26 weeks the busiest hours are 17:00–20:00 Kyiv, and region matters far
   more than hour. The persistence chart first showed a flat 24-point gap up to 24 h ahead, which was
@@ -256,7 +261,7 @@ pipeline.py: the same steps as stages the app runs one by one at any replay mome
 ```
 airraid/            package: regions, schema, sources/, hourly, features, models, backtest, evaluate, cli
 airraid/pipeline.py the pipeline as stages at a replay moment (used by the app)
-airraid/gui/        app pages: overview, data stages, model stages, result
+airraid/gui/        app: top bar, pipeline strip, one view per stage (views.py); state and caches (common.py)
 app.py              Streamlit entry point
 scripts/            one-off analyses (official vs volunteer alert data)
 tests/              leakage, replay vs committed run, Telegram rules, regions

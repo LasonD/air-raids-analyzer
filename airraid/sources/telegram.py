@@ -70,6 +70,11 @@ def classify_posts(posts: pd.DataFrame, channel: str) -> pd.DataFrame:
     posts = posts.sort_values("published_at_utc").reset_index(drop=True)
     posts["kind"] = [classify(t, channel) for t in posts["text"]]
     posts["regions"] = [find_regions(t) for t in posts["text"]]
+    return resolve_follow_ups(posts)
+
+
+def resolve_follow_ups(posts: pd.DataFrame) -> pd.DataFrame:
+    """Posts with a first-pass kind, in publish order -> follow-ups inherit or are dropped."""
     # A follow-up ("На Боярку") continues the previous threat post if it came shortly after and
     # names a place; anything else without a threat type (greetings, news) is dropped.
     prev_kind = posts["kind"].where(~posts["kind"].isin([DROP, FOLLOW_UP])).ffill()
