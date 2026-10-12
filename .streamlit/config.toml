@@ -5,3 +5,14 @@ gatherUsageStats = false
 # Only this machine can open the app.
 address = "localhost"
 port = 8501
+
+[client]
+# Hide the Deploy button and developer menu.
+toolbarMode = "viewer"
+
+# Accent colour blue in both themes: red is reserved for "an alert happened".
+[theme.light]
+primaryColor = "#2a78d6"
+
+[theme.dark]
+primaryColor = "#3987e5"

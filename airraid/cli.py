@@ -11,7 +11,7 @@ from dataclasses import replace
 
 import pandas as pd
 
-from airraid import backtest, evaluate, paths
+from airraid import backtest, evaluate, paths, uncertainty
 from airraid.config import Config
 from airraid.hourly import cap_durations, hourly_matrix
 from airraid.schema import KINDS
@@ -106,6 +106,8 @@ def cmd_report(cfg: Config, args, pred: pd.DataFrame | None = None) -> None:
     meta = {"main_model": f"alert-map for h<={backtest.SHORT_HORIZON}, alert history after", "data_end": str(cfg.data_end), "val_start": str(cfg.val_start), "test_start": str(cfg.test_start),
             "train_days": cfg.train_days, "retrain_days": cfg.retrain_days, "exclude_edited": cfg.exclude_edited}
     (RESULTS / f"run{suffix}.json").write_text(json.dumps(meta, indent=2))
+    if not suffix:  # 95 % ranges for the main results (day-level bootstrap)
+        uncertainty.bootstrap(pred).to_csv(RESULTS / "uncertainty.csv", index=False)
     with pd.option_context("display.width", 160, "display.max_columns", 20):
         print(overall.round(4).to_string(index=False))
 

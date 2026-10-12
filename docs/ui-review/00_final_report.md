@@ -127,3 +127,23 @@ questions, not more labels.
 ### Phase 2 (only if time remains)
 
 Animated hours slider; click-to-select region; red outline halo; partial weeks in the weekly chart.
+
+## Outcome (Phase 1 implemented)
+
+Screenshots after the change: [after/](after/). Checked with Playwright in light, dark and 900 px
+width, every preset and "Pick a date"; no errors.
+
+| # | Status |
+|---|---|
+| 1 | Region chart: Zakarpattia left out with a note; negative regions shown in grey |
+| 2, 3 | Header: what it is, snapshot banner, three findings with 95 % ranges, sources with links |
+| 4 | "Where does the data come from?": three source cards, target definition, official disagreement |
+| 5 | "% better than the usual daily rhythm" everywhere; glossary at the end |
+| 6, 7, 8 | Explorer: presets + date/hour pickers, short aligned controls, one sentence, expected vs actual, test skill at the chosen hours ahead; old M3/M6/M8/M9 removed |
+| 9 | Theme-aware ramp, borders and excluded fill; blue accent; toolbars hidden |
+| 10, 11 | Accuracy chart (next hour + 2–24 h, all and quiet, bands); Telegram gain, validation vs test, with switch-point marker |
+| 12, 13, 14 | One page, no cross-tab state; tables in expanders with readable labels; explorer in `st.fragment` |
+| 15, 16, 17 | Halo outline; calibration with climatology, equal axes; weekly chart from 0, whole weeks only |
+| README | "Never seen in training" and "adds noise" corrected; 95 % ranges added (`results/uncertainty.csv`) |
+
+Not done (phase 2): animated hours slider, click-to-select region.

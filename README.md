@@ -3,12 +3,19 @@
 Every hour, for each of 24 regions (23 oblasts + Kyiv City), the model gives the probability that an
 air raid alert will be active during each of the next 24 hours. It learns from the alert history and,
 optionally, from two public Telegram channels: the Air Force of Ukraine (@kpszsu) and a volunteer
-alert-map channel (@povitryanatrivogaaa). It is evaluated on the last four weeks of data
-(14 Sep – 12 Oct 2026), which it never saw during training.
+alert-map channel (@povitryanatrivogaaa). It is evaluated hour by hour on the last four weeks of data
+(14 Sep – 12 Oct 2026), each week forecast by a model trained only on earlier data.
 
-![Map replay](docs/screenshots/02_map_replay.png)
+![First screen](docs/screenshots/01_header.png)
 
-*Map replay: the forecast made on 30 Sep at 03:00 for the hour 13:00–14:00 (11 hours ahead). Fill = forecast probability, red outline = an alert actually happened in that hour. Here 13 regions had an alert and the model did slightly worse than climatology, an honest miss.*
+*The app's first screen: what it is, that it is a snapshot (not a warning service), the three findings
+with 95 % ranges, and the data sources. Below it: the forecast explorer.*
+
+![Explorer, replay](docs/screenshots/02_explore_replay.png)
+
+*The forecast made on 30 Sep at 03:00 for 13:00–14:00 (11 h ahead): 7.5 regions expected under alert,
+13 actually (red outlines). At 11 h ahead the model is on average only 1.4 % better than the usual
+daily rhythm, and this hour shows why.*
 
 ## Results (test period, 14 Sep – 12 Oct 2026, 380k forecasts)
 
@@ -29,15 +36,19 @@ i.e. "will a new alert start?". Edited Telegram posts are excluded (see leakage,
 
 What this says:
 
-* **The next hour is where the skill is.** Mostly from "an alert is running now", but even at quiet
-  moments the model is ~6 % better than climatology one hour ahead.
-* **Beyond ~3 hours the daily rhythm dominates.** All models are only 1–2 % better than climatology:
+95 % ranges below come from resampling whole days of the test period (`results/uncertainty.csv`).
+
+* **The next hour is where the skill is**: 25.8 % better than climatology (24.3–27.5 %), mostly from
+  "an alert is running now"; at quiet moments 6.5 % (5.0–7.9 %).
+* **Beyond ~3 hours the daily rhythm dominates**: 4–24 h ahead the main model is 1.4 % better
+  (0.7–2.2 %). All models are only 1–2 % better than climatology there:
   in the test period a region had 6.5 alerts a day with a median length of 18 minutes, so *which* hour
   is hard to call far ahead.
 * **Telegram helps for the first 1–3 hours, not after.** At quiet moments a post naming the region in
   the last hour doubles the chance of an alert in the next hour (20 % → 41 %); next-hour skill at quiet
-  moments goes from 0.054 (no Telegram) to 0.065, and 3 hours ahead from 0.015 to 0.022. Further ahead,
-  Telegram features add noise, so the main model drops them after 3 h.
+  moments goes from 0.054 (no Telegram) to 0.065, a gain of +1.1 points (95 %: +0.3 to +1.8). From 4 h
+  on the gain is nothing measurable: slightly negative on validation, +0.15 points (−0.3 to +0.6) on
+  test, so the main model drops Telegram after 3 h.
 * **The main model was chosen on the validation weeks only**: at quiet moments the alert-map channel
   was best for 1–3 h and alert history alone for 4–17 h (it also won some of 18–22 h by small margins;
   a single switch point at 3 h was kept as the simpler, more defensible rule). On the test weeks the
@@ -53,9 +64,8 @@ What this says:
 
 | | |
 |---|---|
-| ![Accuracy](docs/screenshots/03_accuracy.png) | ![Sources](docs/screenshots/04_sources.png) |
-| ![Latest forecast](docs/screenshots/01_map_latest.png) | ![Data](docs/screenshots/05_data.png) |
-| ![Region: 24 forecasts from one moment](docs/screenshots/06_region_charts.png) | |
+| ![How good is it](docs/screenshots/03_how_good.png) | ![Where the data comes from](docs/screenshots/04_data_sources.png) |
+| ![Biggest attack in the test period](docs/screenshots/06_biggest_attack.png) | ![Dark mode, latest forecast](docs/screenshots/05_dark_latest.png) |
 
 ## What went wrong along the way (and what changed)
 
@@ -77,6 +87,13 @@ What this says:
   choice was redone on validation (alert-map only for 1–3 h).
 * **Map drawn inside-out.** GeoJSON polygons wind counter-clockwise, Plotly expects clockwise, so
   every region covered the globe; found with a Playwright screenshot.
+* **The first UI was a researcher's dashboard.** Four independent reviews (first-time comprehension,
+  structure, visual design, analytical honesty; [docs/ui-review/](docs/ui-review/00_final_report.md))
+  found it never said it was a snapshot or how good it was, showed bare decimals, and had a region chart
+  broken by Zakarpattia (no alerts in the test period, skill −682). The app was rebuilt as one page
+  around four questions, with presets (biggest attack, a good and a missed forecast) and 95 % ranges.
+  The honesty review also caught two wrong sentences in this README ("never seen in training"; Telegram
+  "adds noise" beyond 3 h, which holds on validation only).
 
 ## Quick start
 
