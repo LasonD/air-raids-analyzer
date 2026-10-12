@@ -20,10 +20,15 @@ top = V.top_bar()
 # "Run all" is a queue worked off one stage per script run, so each stage starts on a clean screen.
 if top["run_all"]:
     V.enqueue(V.ORDER[:-1], then="result")
+elif top["play"] and V.missing("forecast"):
+    # Play needs what Forecast takes its data from: run those first, then play.
+    V.enqueue(V.missing("forecast"), then="forecast")
+    st.session_state["play_next"] = True
 queue = st.session_state.get("queue") or []
+play = not queue and (top["play"] or st.session_state.pop("play_next", False))
 if queue:
     C.select(queue[0])
-elif top["play"]:
+elif play:
     C.select("forecast")
 bar = V.strip()
 panel = st.container(key="panel")
@@ -38,7 +43,7 @@ if queue:
     if not queue[1:]:
         C.select(st.session_state.get("queue_then", "result"))
     st.rerun()
-elif top["play"]:
+elif play:
     with panel:
         V.render("forecast", play=True)
     st.rerun()

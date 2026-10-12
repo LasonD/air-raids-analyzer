@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 from dataclasses import astuple
 
@@ -154,6 +155,11 @@ def has_models(s: P.Settings, week: pd.Timestamp) -> bool:
     return all(model_key(s, c, week) in store("models") for c in {(), s.channels})
 
 
+@st.cache_resource(show_spinner=False)
+def _training() -> threading.Lock:
+    return threading.Lock()
+
+
 def models(fs, s: P.Settings, week: pd.Timestamp, log=None) -> tuple[Boosting | None, Boosting]:
     """(Telegram model for 1-3 h, alert-history model), trained once per week; a model never depends on the clock."""
     out, cache = {}, store("models")
@@ -163,7 +169,11 @@ def models(fs, s: P.Settings, week: pd.Timestamp, log=None) -> tuple[Boosting | 
             if log:
                 log(f"training {model_name(channels)} for the week of {kyiv(week, '%d %b')}…")
             t0 = time.time()
-            cache[key] = P.train(fs, s, channels, week)
+            # One training at a time server-wide: two sessions training at once ran out of memory; the one that
+            # waits then reuses the model the other trained.
+            with _training():
+                if key not in cache:
+                    cache[key] = P.train(fs, s, channels, week)
             if log:
                 log(f"trained {model_name(channels)} for the week of {kyiv(week, '%d %b')} ({time.time() - t0:.0f} s)")
         out[channels] = cache[key]

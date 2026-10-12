@@ -67,7 +67,8 @@ BUTTON_TIPS = {
     **{f"node_{k}": tip for k, (_, tip) in C.STAGES.items()},
     **{f"step_{h}": f"Move the clock {'back' if h < 0 else 'forward'} 1 {'day' if abs(h) == 24 else 'hour'}"
        for h in (-24, -1, 1, 24)},
-    "play": "Step the clock an hour at a time for a day and watch the forecast update. Any click stops it.",
+    "play": "Step the clock an hour at a time for a day and watch the forecast update (Sources, Parsing and Format "
+            "run first if they have not). Any click stops it.",
     "run_all": "Run every stage in order for this moment and these inputs, watching each one fill.",
     **{f"live_{k}": "Read the newest page of each channel straight from Telegram (about 20 posts each)."
        for k in (True, False)},
