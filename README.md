@@ -74,14 +74,16 @@ What this says:
 ## The app
 
 One screen: the clock and inputs on top, the pipeline below it, then the selected stage. Explanations
-live in tooltips and each stage's ⓘ.
+live in tooltips and each stage's ⓘ. A run shows its steps live in a log that folds into one line when it
+ends (open it to see each step's count and time); each stage shows its main result first, with details in
+tabs and folded sections.
 
 | Stage | Shows | While running |
 |---|---|---|
-| Sources | what each source holds by "now"; raw rows; **📡 the newest posts, live** | each source's card fills as it loads |
+| Sources | what each source holds by "now"; raw rows; **📡 the newest posts, live** | each source loads as a step |
 | Parsing | try any post: kind, rule, regions; kinds per channel; parsed posts | kinds chart grows batch by batch |
-| Format | all sources for one region on one time axis; the hourly table the model gets | |
-| Patterns | trend since 2022, hour of day by region, persistence, co-occurrence, durations | |
+| Format | all sources for one region on one time axis; the hourly table the model gets | each source checked against the common format |
+| Patterns | one finding per tab: trend since 2022, persistence, hour of day by region, co-occurrence, durations | |
 | Model | weekly walk-forward on the weeks before "now", scored; match with the committed run | each week's bar turns amber (training), then blue with its score |
 | Forecast | map, 24 hours for a region, this week's forecasts checked so far; jump to examples | ▷ Play steps the clock an hour at a time |
 | Result | findings with 95 % ranges, what Telegram adds, warnings vs false alarms, regions | |

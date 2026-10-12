@@ -23,7 +23,7 @@ if queue:
 elif top["play"]:
     C.select("forecast")
 bar = V.strip()
-panel = st.container()
+panel = st.container(key="panel")
 
 if queue:
     done = len(V.ORDER) - 1 - len(queue)

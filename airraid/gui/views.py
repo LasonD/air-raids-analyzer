@@ -46,6 +46,7 @@ CSS = """<style>
 [class*="st-key-nodebox_"] button div, [class*="st-key-nodebox_"] button p {min-width: 0; max-width: 100%;}
 [class*="st-key-nodebox_"] button p {font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;}
 .st-key-topbar button {padding-left: 0.3rem; padding-right: 0.3rem;}
+.st-key-panel {border-top: 1px solid rgba(128, 128, 128, 0.3); padding-top: 0.9rem; margin-top: 0.5rem;}
 </style>"""
 
 # Hover tips in plain CSS for buttons that rerun the app: Streamlit's own tooltip stays on screen when a click
@@ -177,7 +178,7 @@ def top_bar() -> dict:
                       help="Inputs differ from the committed run" if changed else "Telegram channels and model settings"):
         st.caption("The alert history is always used: it is what is forecast.")
         for ch, name in C.CHANNELS.items():
-            st.toggle(f"{name.capitalize()} (@{ch})", key=f"ch_{ch}")
+            st.toggle(f"{name[0].upper() + name[1:]} (@{ch})", key=f"ch_{ch}")
         st.select_slider("Training window (days)", [56, 91, 126, 182], key="train_days")
         st.select_slider("Cap alerts at (hours)", [6, 12, 24], key="max_alert_hours")
         st.checkbox("Leave out edited Telegram posts", key="exclude_edited")
@@ -210,6 +211,59 @@ def node_status(stage: str, text: str | None = None, state: str | None = None) -
 
 def running(stage: str, text: str) -> None:
     node_status(stage, f"⏳ {text}", "running")
+
+
+def _step_line(text: str, detail: str, secs: float) -> str:
+    return f"✓ {text}" + (f" · {detail}" if detail else "") + f" · {secs:.1f} s"
+
+
+class RunLog:
+    """A stage run as steps: open and live while it runs, then folded into one line; the steps stay with the run."""
+
+    def __init__(self, stage: str):
+        self.stage, self.t0, self.steps, self.open = stage, time.time(), [], None
+        # A fresh box: one reused from the last script run would keep its old lines (greyed) until this run ends.
+        self.box = st.empty().status(f"Running {C.STAGES[stage][0].lower()}…", expanded=True)
+
+    def step(self, text: str) -> None:
+        self._close()
+        self.open = [text, "", time.time(), self.box.empty()]
+        self.open[3].markdown(f"⏳ {text}…")
+        running(self.stage, text)
+
+    def detail(self, text: str) -> None:
+        self.open[1] = text
+        self.open[3].markdown(f"⏳ {self.open[0]} · {text}")
+
+    def _close(self) -> None:
+        if self.open:
+            text, detail, t, slot = self.open
+            self.steps.append((text, detail, time.time() - t))
+            slot.markdown(_step_line(*self.steps[-1]))
+            self.open = None
+
+    def finish(self, out=None, note: str = "") -> None:
+        self._close()
+        secs = time.time() - self.t0
+        n = len(self.steps)
+        self.box.update(label=f"Run · {n} step{'' if n == 1 else 's'} · {secs:.1f} s", state="complete", expanded=False)
+        C.record(self.stage, secs, out=out, note=note)
+        C.runs()[self.stage]["log"] = self.steps
+
+
+def show_log(stage: str) -> bool:
+    """The last run's steps, folded; False if the stage has not run."""
+    r = C.runs().get(stage)
+    if r is None:
+        return False
+    steps = r.get("log") or []
+    stale = C.status(stage) == "out of date"
+    label = ("Last run, before the clock or inputs changed" if stale else "Last run") + \
+        f" · {len(steps)} step{'' if len(steps) == 1 else 's'} · {r['seconds']:.1f} s" + (f" · {r['note']}" if r.get("note") else "")
+    with st.expander(label, icon=":material/warning:" if stale else ":material/check_circle:"):
+        for x in steps:
+            st.markdown(_step_line(*x))
+    return True
 
 
 def strip():
@@ -245,7 +299,11 @@ def header(stage: str) -> bool:
 
 def render(stage: str, run: bool = False, play: bool = False) -> bool:
     clicked = header(stage)
-    VIEWS[stage](run or clicked, play) if stage == "forecast" else VIEWS[stage](run or clicked)
+    # Each stage draws in its own slot, and a run in a slot apart from its view: Streamlit reuses what was last drawn
+    # in the same place and keeps its old elements on screen until the run ends. Other slots are blanked first.
+    slots = [st.empty() for _ in range(2 * len(ORDER))]
+    with slots[2 * ORDER.index(stage) + (1 if run or clicked or play else 0)].container():
+        VIEWS[stage](run or clicked, play) if stage == "forecast" else VIEWS[stage](run or clicked)
     node_status(stage)
     return clicked
 
@@ -281,7 +339,7 @@ def source_card(name: str) -> None:
     n = len(before) if src.role == "alerts" else len(before.drop_duplicates(["ref", "published_at_utc"]))
     unit = "alerts" if src.role == "alerts" else "posts"
     st.metric(f"{C.SOURCE_NAMES[name]} · {unit}", f"{n:,}", f"latest {C.kyiv(before[col].max(), '%d %b %H:%M')}",
-              delta_color="off", help=SOURCE_HELP[name])
+              delta_color="off", delta_arrow="off", help=SOURCE_HELP[name])
     d = daily(name)
     d = d[d.index < t]
     fig = go.Figure(go.Bar(x=C.local(d.index), y=d.values, marker_color=C.ALERT_RED if src.role == "alerts" else C.BLUE,
@@ -324,26 +382,22 @@ def live_posts_block(parsed: bool) -> None:
 
 
 def v_sources(run: bool) -> None:
-    done = C.status("sources") != "not run"
-    cols = st.columns(3)
-    t0 = time.time()
-    for col, name in zip(cols, ["etryvoga", *P.SIGNALS]):
-        with col:
-            if run:
-                running("sources", f"loading {C.SOURCE_NAMES[name].lower()}")
-                with st.spinner(f"Loading {C.SOURCE_NAMES[name].lower()}…"):
-                    C.source(name)
-            if run or done:
-                source_card(name)
-            else:
-                st.metric(f"{C.SOURCE_NAMES[name]}", "–", help=SOURCE_HELP[name])
     if run:
-        C.record("sources", time.time() - t0)
-    elif not done:
+        log = RunLog("sources")
+        for name in ["etryvoga", *P.SIGNALS]:
+            log.step(f"Load {C.SOURCE_NAMES[name].lower()}")
+            src = C.source(name)
+            log.detail(f"{len(src.frame):,} rows")
+        log.finish()
+    elif not show_log("sources"):
         hint("Run loads the three sources.")
         return
-    live_posts_block(parsed=False)
-    with st.popover("🔍 Raw data, before any processing"):
+    for col, name in zip(st.columns(3), ["etryvoga", *P.SIGNALS]):
+        with col:
+            source_card(name)
+    with st.expander("📡 Newest posts, straight from Telegram"):
+        live_posts_block(parsed=False)
+    with st.expander("🔍 Raw data, before any processing"):
         t = C.now()
         raw = raw_alert_rows()
         st.dataframe(raw[raw["started_at"] < t].tail(6), hide_index=True)
@@ -380,31 +434,34 @@ def group_counts(kinds: pd.Series) -> pd.Series:
 
 
 def parse_live() -> None:
-    t0 = time.time()
-    box = st.empty()
-    with box.container(border=True):
-        for ch in P.SIGNALS:
-            src = registry()[ch]
-            if not src.has_pages():
-                C.set_classified(ch, None)
-                continue
-            running("parsing", f"reading {C.CHANNELS[ch]}")
-            with st.spinner(f"Reading the downloaded pages of the {C.CHANNELS[ch]}…"):
-                posts = load_posts(ch)
-            bar, chart = st.progress(0.0), st.empty()
-            kinds, regions, n, step = [], [], len(posts), 4000
-            for i in range(0, n, step):
-                texts = posts["text"].iloc[i:i + step]
-                kinds += [classify(x, ch) for x in texts]
-                regions += [find_regions(x) for x in texts]
-                bar.progress(len(kinds) / n, f"{C.CHANNELS[ch]}: {len(kinds):,} of {n:,} posts parsed")
-                running("parsing", f"{C.CHANNELS[ch]} {len(kinds) / n:.0%}")
-                with chart.container():
-                    C.show(kinds_chart({C.CHANNELS[ch]: group_counts(pd.Series(kinds))}, 200))
-            posts["kind"], posts["regions"] = kinds, regions
-            C.set_classified(ch, resolve_follow_ups(posts))
-    box.empty()
-    C.record("parsing", time.time() - t0)
+    log = RunLog("parsing")
+    for ch in P.SIGNALS:
+        name = C.CHANNELS[ch][0].upper() + C.CHANNELS[ch][1:]
+        if not registry()[ch].has_pages():
+            log.step(f"{name}: no downloaded pages")
+            log.detail("python -m airraid fetch downloads them")
+            C.set_classified(ch, None)
+            continue
+        log.step(f"{name}: read the downloaded pages")
+        posts = load_posts(ch)
+        log.detail(f"{len(posts):,} posts")
+        log.step(f"{name}: kind and regions of every post")
+        bar, chart = log.box.progress(0.0), log.box.empty()
+        kinds, regions, n, step = [], [], len(posts), 4000
+        for i in range(0, n, step):
+            texts = posts["text"].iloc[i:i + step]
+            kinds += [classify(x, ch) for x in texts]
+            regions += [find_regions(x) for x in texts]
+            bar.progress(len(kinds) / n, f"{len(kinds):,} of {n:,} posts")
+            running("parsing", f"{C.CHANNELS[ch]} {len(kinds) / n:.0%}")
+            with chart.container():
+                C.show(kinds_chart({C.CHANNELS[ch]: group_counts(pd.Series(kinds))}, 200))
+        bar.empty(), chart.empty()
+        posts["kind"], posts["regions"] = kinds, regions
+        log.detail(f"{(~posts['kind'].isin(['drop', 'follow_up'])).sum():,} threat posts")
+        log.step(f"{name}: link short follow-ups to the threat before them")
+        C.set_classified(ch, resolve_follow_ups(posts))
+    log.finish()
 
 
 def _pg_edited():
@@ -437,20 +494,27 @@ def playground() -> None:
 def v_parsing(run: bool) -> None:
     if run:
         parse_live()
-    playground()
-    if C.status("parsing") == "not run":
-        hint("Run parses every downloaded post, in batches.")
-        return
+    elif not show_log("parsing"):
+        hint("Run parses every downloaded post, in batches. Try the rules on one post below meanwhile.")
     parsed = {ch: C.classified(ch) for ch in P.SIGNALS if C.classified(ch) is not None}
     t = C.now()
-    if parsed:
-        a, b = st.columns([2, 3])
+    if parsed and C.status("parsing") != "not run":
+        a, b = st.columns([3, 2], vertical_alignment="center")
         with a:
-            C.show(kinds_chart({C.CHANNELS[ch]: group_counts(p["kind"]) for ch, p in parsed.items()}, 260))
-            stats = {C.CHANNELS[ch]: (p.loc[~p["kind"].isin(["drop", "follow_up", "clear"]), "regions"].str.len() > 0).mean()
-                     for ch, p in parsed.items()}
-            st.caption(" · ".join(f"{k}: {v:.0%} of threat posts name a region" for k, v in stats.items()))
+            C.show(kinds_chart({C.CHANNELS[ch]: group_counts(p["kind"]) for ch, p in parsed.items()}, 240))
         with b:
+            for ch, p in parsed.items():
+                threat = p.loc[~p["kind"].isin(["drop", "follow_up", "clear"])]
+                st.metric(f"{C.CHANNELS[ch][0].upper() + C.CHANNELS[ch][1:]}: threat posts naming a region",
+                          f"{(threat['regions'].str.len() > 0).mean():.0%}", f"of {len(threat):,}", delta_color="off",
+                          delta_arrow="off")
+    elif C.status("parsing") != "not run":
+        st.caption("Post texts are not in the repository (python -m airraid fetch downloads them); "
+                   "parse the newest posts live instead (📡 tab).")
+    tabs = (["Latest events"] if parsed and C.status("parsing") != "not run" else []) + ["Try a post", "📡 Newest posts"]
+    tab = dict(zip(tabs, st.tabs(tabs)))
+    if "Latest events" in tab:
+        with tab["Latest events"]:
             ch = st.segmented_control("Channel", list(parsed), default=list(parsed)[-1], format_func=C.CHANNELS.get,
                                       key="parse_channel", label_visibility="collapsed", required=True) or list(parsed)[-1]
             p = parsed[ch]
@@ -460,10 +524,10 @@ def v_parsing(run: bool) -> None:
                 "kind": p["kind"].replace({"drop": "—"}),
                 "regions": p["regions"].map(lambda r: ", ".join(BY_CODE[c].name for c in r)),
                 "text": p["text"]}), hide_index=True, height=300)
-    else:
-        st.caption("Post texts are not in the repository (python -m airraid fetch downloads them); "
-                   "parse the newest posts live instead:")
-    live_posts_block(parsed=True)
+    with tab["Try a post"]:
+        playground()
+    with tab["📡 Newest posts"]:
+        live_posts_block(parsed=C.status("parsing") != "not run")
 
 
 # ---------------------------------------------------------------- 3 common format
@@ -502,30 +566,33 @@ def timeline(region: str, start: pd.Timestamp, end: pd.Timestamp):
 def v_format(run: bool) -> None:
     t, s = C.now(), C.settings()
     if run:
-        t0 = time.time()
-        running("format", "building the hourly table")
-        with st.spinner("Normalising and building the hourly table…"):
-            S.hourly(t, s.max_alert_hours)
-        C.record("format", time.time() - t0)
-    if C.status("format") == "not run":
+        log = RunLog("format")
+        inp = C.inputs()
+        for x in [inp.alerts, *inp.signals]:
+            log.step(f"{C.SOURCE_NAMES[x.name]}: common format checked")
+            log.detail(f"{len(x.frame):,} rows; columns, UTC times, regions, kinds, coverage")
+        log.step("Hourly table: alert or not, per region and hour")
+        H = S.hourly(t, s.max_alert_hours)
+        log.detail(f"{len(H):,} hours × {H.shape[1]} regions")
+        log.finish()
+    elif not show_log("format"):
         hint("Run brings every source into one format and builds the hourly table.")
         return
-    inp = C.inputs()
-    st.markdown(" ".join(f":green-badge[✓ {C.SOURCE_NAMES[x.name]} · {len(x.frame):,} rows]" for x in [inp.alerts, *inp.signals]),
-                help="Each source passed schema.validate: columns, UTC times, known regions and kinds, coverage period.")
     names = [BY_CODE[c].name for c in CODES]
     a, b = st.columns([3, 2], vertical_alignment="bottom")
     region = a.selectbox("Region", names, index=CODES.index("UA-63"), key="fmt_region", label_visibility="collapsed")
     hours = b.segmented_control("Window", [12, 24, 48], default=24, format_func=lambda h: f"last {h} h",
                                 key="fmt_hours", label_visibility="collapsed", required=True) or 24
     C.show(timeline(CODES[names.index(region)], t - pd.Timedelta(hours=hours), t))
-    H = S.hourly(t, s.max_alert_hours)
-    last = H[H.index >= t - pd.Timedelta(hours=48)]
-    order = last.mean().sort_values().index
-    fig = go.Figure(go.Heatmap(z=last[order].T.values, x=C.local(last.index), y=[BY_CODE[c].name for c in order],
-                               zmin=0, zmax=1, colorscale=[[0, C.theme()["ramp"][0]], [1, C.ALERT_RED]], showscale=False,
-                               xgap=1, ygap=1, hovertemplate="%{y}, %{x|%d %b %H:00}: %{z:.0f}<extra></extra>"))
-    C.show(C.small(fig, 440, "What the model receives: alert or not, per region and hour (last 48 h)"))
+    with st.expander("What the model receives: alert or not, per region and hour (last 48 h)"):
+        H = S.hourly(t, s.max_alert_hours)
+        last = H[H.index >= t - pd.Timedelta(hours=48)]
+        order = last.mean().sort_values().index
+        fig = go.Figure(go.Heatmap(z=last[order].T.values, x=C.local(last.index), y=[BY_CODE[c].name for c in order],
+                                   zmin=0, zmax=1, colorscale=[[0, C.theme()["ramp"][0]], [1, C.ALERT_RED]],
+                                   showscale=False, xgap=1, ygap=1,
+                                   hovertemplate="%{y}, %{x|%d %b %H:00}: %{z:.0f}<extra></extra>"))
+        C.show(C.small(fig, 440))
 
 
 # ---------------------------------------------------------------- 4 patterns
@@ -533,24 +600,23 @@ def v_format(run: bool) -> None:
 def v_patterns(run: bool) -> None:
     t, s = C.now(), C.settings()
     if run:
-        t0 = time.time()
-        running("patterns", "computing")
-        with st.spinner("Analysing the alert history…"):
-            S.patterns(t, s.max_alert_hours)
-        C.record("patterns", time.time() - t0)
-    if C.status("patterns") == "not run":
+        log = RunLog("patterns")
+        log.step("Alert history known at 'now': drift, persistence, rhythm, co-occurrence, durations")
+        S.patterns(t, s.max_alert_hours)
+        log.finish()
+    elif not show_log("patterns"):
         hint("Run analyses the alert history known at 'now'.")
         return
     R = S.patterns(t, s.max_alert_hours)
-    a, b = st.columns(2)
-    with a:
+    tabs = st.tabs(["Over months", "After an alert", "Region and hour", "Regions together", "Durations"])
+    with tabs[0]:
         m = R["monthly"]
         fig = go.Figure(go.Scatter(x=C.local(m.index), y=m.values, mode="lines", line=dict(color=C.BLUE, width=2),
                                    hovertemplate="%{x|%b %Y}: %{y:.0%}<extra></extra>"))
         fig.update_layout(yaxis=dict(tickformat=".0%", rangemode="tozero"))
-        C.show(C.small(fig, 250, f"Alerts drift over months ({C.pct(m.min(), 0)}–{C.pct(m.max(), 0)} of region-hours) "
+        C.show(C.small(fig, 280, f"Alerts drift over months ({C.pct(m.min(), 0)}–{C.pct(m.max(), 0)} of region-hours) "
                                  "→ train on a rolling half-year"))
-    with b:
+    with tabs[1]:
         pe = R["persistence"]
         fig = go.Figure()
         for col, color, label in (("after_alert", C.ALERT_RED, "after an alert hour"),
@@ -562,10 +628,9 @@ def v_patterns(run: bool) -> None:
         fig.update_layout(legend=dict(orientation="h", y=-0.3), xaxis=dict(title="hours later", dtick=4),
                           yaxis=dict(tickformat="+.0%"))
         pa = pe.set_index("h")["after_alert"]
-        C.show(C.small(fig, 250, f"An alert now: {pa[1] * 100:+.0f} pts next hour, {pa[12] * 100:+.0f} after 12 h "
+        C.show(C.small(fig, 280, f"An alert now: {pa[1] * 100:+.0f} pts next hour, {pa[12] * 100:+.0f} after 12 h "
                                  "→ the next hour is easy, later is hard"))
-    a, b = st.columns(2)
-    with a:
+    with tabs[2]:
         prof = R["rhythm"]
         prof.index = [BY_CODE[c].name for c in prof.index]
         prof = prof.loc[prof.mean(axis=1).sort_values().index]
@@ -574,19 +639,20 @@ def v_patterns(run: bool) -> None:
                                    hovertemplate="%{y}, %{x}:00 → %{z:.0%}<extra></extra>"))
         fig.update_layout(xaxis=dict(title="hour of day (Kyiv)", dtick=3))
         C.show(C.small(fig, 420, "Region matters far more than hour → the usual daily rhythm is the baseline"))
-    with b:
+    with tabs[3]:
         tg = R["together"]
         fig = go.Figure(go.Bar(x=tg.index, y=tg.values, marker_color=C.BLUE,
                                hovertemplate="%{x} regions at once: %{y:.0%} of hours<extra></extra>"))
         fig.update_layout(xaxis=dict(title="regions under alert in the same hour"), yaxis=dict(tickformat=".0%"))
-        C.show(C.small(fig, 200, f"Regions go under alert together (neighbours r = {R['nb_corr']:.2f}, others "
+        C.show(C.small(fig, 280, f"Regions go under alert together (neighbours r = {R['nb_corr']:.2f}, others "
                                  f"{R['other_corr']:.2f}) → neighbours are a feature"))
+    with tabs[4]:
         d = R["durations"]
         fig = go.Figure(go.Histogram(x=d.clip(upper=24), xbins=dict(start=0, end=24.5, size=0.5), marker_color=C.BLUE,
                                      hovertemplate="%{x} h: %{y} alerts<extra></extra>"))
         fig.add_vline(x=s.max_alert_hours, line=dict(color=C.GREY, dash="dot"))
         fig.update_layout(xaxis=dict(title="hours (24 = 24 or more)"))
-        C.show(C.small(fig, 200, f"Median alert {d.median() * 60:.0f} min; {C.pct((d > 12).mean())} over 12 h → capped"))
+        C.show(C.small(fig, 280, f"Median alert {d.median() * 60:.0f} min; {C.pct((d > 12).mean())} over 12 h → capped"))
 
 
 # ---------------------------------------------------------------- 5 model
@@ -625,45 +691,38 @@ def v_model(run: bool) -> None:
     if not blocks:
         hint("Move the clock later: no week can be scored yet.")
         return
-    log, chart = st.empty(), st.empty()
     states, labels = {}, {}
     if run:
-        t0 = time.time()
-        with st.spinner("Building features from the data known at 'now'…"):
-            running("model", "features")
-            fs = C.features_now(s)
+        log = RunLog("model")
+        chart = st.empty()
+        log.step("Features from the data known at 'now'")
+        fs = C.features_now(s)
+        log.detail(f"{len(fs.region):,} rows, one per moment and region")
         out, reused = [], sum(C.has_models(s, w) for w, _ in blocks)
         for i, (w, end) in enumerate(blocks):
+            had = C.has_models(s, w)
+            log.step(f"Week of {C.kyiv(w, '%d %b')} ({i + 1} of {len(blocks)})")
             states[w], labels[w] = "training", "training…"
             with chart.container():
                 C.show(walk_chart(s, t, blocks, states, labels))
-            short, long = C.models(fs, s, w, log=lambda m: (log.caption(m), running("model", f"week {i + 1}/{len(blocks)}")))
+            short, long = C.models(fs, s, w, log=lambda m: (log.detail(m), running("model", f"week {i + 1}/{len(blocks)}")))
             pred = P.predict(fs, s, short, long, w, end).dropna(subset=["y"])
             out.append(pred)
             states[w], labels[w] = "done", week_skill(pred)
-        log.empty()
-        C.record("model", time.time() - t0, out=pd.concat(out, ignore_index=True),
-                 note="models reused" if reused == len(blocks) else "")
+            log.detail(f"{'model reused' if had else 'trained'}, {labels[w]}")
+        chart.empty()
+        log.finish(out=pd.concat(out, ignore_index=True), note="models reused" if reused == len(blocks) else "")
         C.runs()["model"].update(blocks=blocks, t=t, s=s)  # what this run covered, to draw it as it was
-    r = C.runs().get("model")
-    if r is None:
-        with chart.container():
-            C.show(walk_chart(s, t, blocks, {}, {}))
+    elif not show_log("model"):
+        C.show(walk_chart(s, t, blocks, {}, {}))
         hint(f"Run trains {2 if s.channels else 1} model(s) per week on the data before it and scores its forecasts.")
         return
+    r = C.runs()["model"]
     pred = r["out"]
     blocks, t, s = r.get("blocks", blocks), r.get("t", t), r.get("s", s)  # the run as made, even if out of date
     starts = [w for w, _ in blocks]
     pos = pd.DatetimeIndex(starts).searchsorted(pred["t"], side="right") - 1
     labels = {starts[i]: week_skill(g) for i, g in pred.groupby(pos)}
-    with chart.container():
-        C.show(walk_chart(s, t, blocks, {w: "done" for w in labels}, labels))
-    if C.status("model") == "out of date":
-        st.caption("⚠ The clock or the inputs changed since this run.")
-    elif r.get("note"):
-        st.markdown(":gray-badge[♻ models reused]", help="A week's model depends only on the data before that week, "
-                    "never on the clock, so models trained in an earlier run (by anyone using this app) are kept and "
-                    "reused; this run only built the features and scored the forecasts.")
     q = pred[pred["active_now"] == 0]
     h1, q1, longer = pred[pred["h"] == 1], q[q["h"] == 1], pred[pred["h"] >= 4]
     m = st.columns(4)
@@ -675,6 +734,11 @@ def v_model(run: bool) -> None:
     gain = C.skill(q1["y"], q1["p_short"], q1["p_climatology"]) - C.skill(q1["y"], q1["p_long"], q1["p_climatology"])
     m[3].metric("Telegram gain, next hour", f"{gain * 100:+.1f} pts" if s.channels else "–",
                 help="Telegram model minus alert-history model, moments with no alert running")
+    C.show(walk_chart(s, t, blocks, {w: "done" for w in labels}, labels))
+    if r.get("note") and C.status("model") != "out of date":
+        st.markdown(":gray-badge[♻ models reused]", help="A week's model depends only on the data before that week, "
+                    "never on the clock, so models trained in an earlier run (by anyone using this app) are kept and "
+                    "reused; this run only built the features and scored the forecasts.")
     rows = []
     for subset, g in (("all moments", pred), ("no alert running", q)):
         for h, gh in g[g["h"] >= 2].groupby("h"):
@@ -689,7 +753,8 @@ def v_model(run: bool) -> None:
     fig.add_hline(y=0, line=dict(color=C.GREY, width=1, dash="dot"))
     fig.update_layout(legend=dict(orientation="h", y=-0.3), xaxis=dict(title="hours ahead", dtick=2),
                       yaxis=dict(tickformat=".0%"))
-    C.show(C.small(fig, 280, "2–24 h ahead: % better than usual rhythm"))
+    with st.expander("2–24 hours ahead"):
+        C.show(C.small(fig, 280, "2–24 h ahead: % better than usual rhythm"))
     if len(same):
         diff = float((same["p_main"] - same["p_main_ref"]).abs().max())
         ok = diff < 1e-6
@@ -728,18 +793,27 @@ def _jump():
     st.session_state["jump"] = None
 
 
-def compute_forecast(say) -> None:
+def compute_forecast(log: RunLog | None = None, say=None) -> None:
     s, t = C.settings(), C.now()
     t0 = time.time()
+    step = log.step if log else (lambda m: None)
+    step("Features from the data known at 'now'")
     fs = C.features_now(s)
     week = P.week_of(s.config(), t)
     cached = C.has_models(s, week)
-    short, long = C.models(fs, s, week, log=lambda m: (say(m), running("forecast", "training")))
+    step(f"Model for the week of {C.kyiv(week, '%d %b')}")
+    short, long = C.models(fs, s, week, log=lambda m: ((log.detail if log else say)(m), running("forecast", "training")))
+    if log:
+        log.detail("reused" if cached else "trained on the data before that week")
+    step("Forecast: 24 regions × 24 hours, and this week's forecasts so far")
     fc = P.predict(fs, s, short, long, t, t + P.HOUR)
     so_far = (P.predict(fs, s, short, long, week, t - pd.Timedelta(hours=23)).dropna(subset=["y"])
               if t - pd.Timedelta(hours=23) > week else pd.DataFrame())
-    C.record("forecast", time.time() - t0, out={"fc": fc, "so_far": so_far, "week": week},
-             note="model reused" if cached else "")
+    out, note = {"fc": fc, "so_far": so_far, "week": week}, "model reused" if cached else ""
+    if log:
+        log.finish(out=out, note=note)
+    else:
+        C.record("forecast", time.time() - t0, out=out, note=note)
 
 
 def draw_forecast(map_slot, side_slot, h: int, rhythm: bool, hindsight: bool, region: int) -> None:
@@ -779,6 +853,11 @@ def draw_forecast(map_slot, side_slot, h: int, rhythm: bool, hindsight: bool, re
 def v_forecast(run: bool, play: bool = False) -> None:
     s, t = C.settings(), C.now()
     week = P.week_of(s.config(), t)
+    ready = C.has_models(s, week)
+    compute = run or play or (ready and C.status("forecast") != "done")
+    log = RunLog("forecast") if compute and not play else None
+    if log is None:
+        show_log("forecast")
     names = [BY_CODE[c].name for c in CODES]
     c = st.columns([2.2, 1.6, 1.2, 1.4, 1.6], vertical_alignment="bottom")
     h = c[0].slider("Hours ahead", 1, 24, 1, help="1 = the hour right after the forecast is made.")
@@ -791,11 +870,8 @@ def v_forecast(run: bool, play: bool = False) -> None:
     say = st.empty()
     left, right = st.columns([3, 2])
     map_slot, side_slot = left.empty(), right.empty()
-    ready = C.has_models(s, week)
-    if run or play or (ready and C.status("forecast") != "done"):
-        if not ready:
-            say.caption(f"New week: training the model for the week of {C.kyiv(week, '%d %b')} on the data before it…")
-        compute_forecast(say.caption)
+    if compute:
+        compute_forecast(log, say.caption)
         say.empty()
     if C.status("forecast") == "not run":
         hint(f"Run trains the model for the week of {C.kyiv(week, '%d %b')} and forecasts the next 24 hours.")
@@ -807,7 +883,7 @@ def v_forecast(run: bool, play: bool = False) -> None:
                 break
             C.set_now(C.now() + P.HOUR)
             running("forecast", C.kyiv(C.now(), "%d %b %H:%M"))
-            compute_forecast(say.caption)
+            compute_forecast(say=say.caption)
             say.empty()
             draw_forecast(map_slot, side_slot, h, rhythm, hindsight, region)
             time.sleep(0.3)
@@ -883,10 +959,10 @@ def v_result(run: bool) -> None:
         fig.update_layout(legend=dict(orientation="h", y=-0.3), xaxis=dict(title="hours ahead", dtick=2),
                           yaxis=dict(tickformat="+.1%"))
         C.show(C.small(fig, 300, "What Telegram adds → used up to 3 h"))
-    a, b = st.columns([3, 2])
-    with a:
+    tabs = st.tabs(["Acting on it: warnings vs false alarms", "By region"])
+    with tabs[0]:
         decision(test)
-    with b:
+    with tabs[1]:
         alerts = test[test["h"] == 1].groupby("region")["y"].mean()
         br = ref["by_region"]
         br = br[(br["model"] == "main") & br["region"].map(alerts).gt(0)].sort_values("brier_skill")
